@@ -1,0 +1,1 @@
+Data retrival is pretty manual right now. If I got access to more data I would automate it. Then when given games.csv and teams.csv this calculates elo at each timestep and saves to calculated_elo.csv
