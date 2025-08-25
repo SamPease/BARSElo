@@ -1,79 +1,112 @@
-7/20/2025 15:30:00,Drill,2,Tool Belt,3
-7/20/2025 15:30:00,Stud Finder,3,Loose Screw,1
-7/20/2025 15:50:00,Stud Finder,3,Tool Belt,2
-7/20/2025 15:50:00,Loose Screw,2,Drill,3
-7/20/2025 16:10:00,Tool Belt,3,Loose Screw,2
-7/20/2025 16:10:00,Drill,3,Stud Finder,1
-7/23/2025 19:00:00,The Bloody Marys,1,Cinnamint Toast Munch,2
-7/23/2025 19:00:00,GayTorade,0,Dark Roast Doms,4
-7/23/2025 19:20:00,Purple P***y Eaters,2,Ferociously Fruity Pebbles,2
-7/23/2025 19:20:00,Green Eggs and Sam,2,Jolly Green Gays,3
-7/23/2025 19:40:00,Cinnamint Toast Munch,0,Yolked & Choked,4
-7/23/2025 19:40:00,Dark Roast Doms,3,Captain Munch,1
-7/23/2025 20:00:00,Ferociously Fruity Pebbles,0,The Bloody Marys,4
-7/23/2025 20:00:00,GayTorade,1,Purple P***y Eaters,3
-7/23/2025 20:20:00,Yolked & Choked,3,Green Eggs and Sam,1
-7/23/2025 20:20:00,Captain Munch,3,Jolly Green Gays,1
-7/27/2025 15:30:00,Loose Screw,2,Tool Belt,4
-7/27/2025 15:30:00,Stud Finder,3,Drill,2
-7/27/2025 15:50:00,Drill,0,Loose Screw,5
-7/27/2025 15:50:00,Tool Belt,3,Stud Finder,2
-7/27/2025 16:10:00,Loose Screw,0,Stud Finder,5
-7/27/2025 16:10:00,Tool Belt,1,Drill,4
-7/30/2025 19:00:00,GayTorade,1,Yolked & Choked,2
-7/30/2025 19:00:00,Cinnamint Toast Munch,4,Green Eggs and Sam,0
-7/30/2025 19:20:00,Dark Roast Doms,0,The Bloody Marys,3
-7/30/2025 19:20:00,Purple P***y Eaters,0,Captain Munch,5
-7/30/2025 19:40:00,Yolked & Choked,3,Ferociously Fruity Pebbles,0
-7/30/2025 19:40:00,Jolly Green Gays,0,Cinnamint Toast Munch,5
-7/30/2025 20:00:00,The Bloody Marys,0,GayTorade,3
-7/30/2025 20:00:00,Captain Munch,4,Green Eggs and Sam,1
-7/30/2025 20:20:00,Purple P***y Eaters,3,Dark Roast Doms,0
-7/30/2025 20:20:00,Ferociously Fruity Pebbles,1,Jolly Green Gays,3
-8/3/2025 15:30:00,Loose Screw,3,Tool Belt,2
-8/3/2025 15:30:00,Drill,2,Stud Finder,3
-8/3/2025 15:50:00,Drill,1,Tool Belt,4
-8/3/2025 15:50:00,Stud Finder,4,Loose Screw,1
-8/3/2025 16:10:00,Tool Belt,5,Stud Finder,1
-8/3/2025 16:10:00,Loose Screw,3,Drill,2
-8/6/2025 19:00:00,Jolly Green Gays,2,GayTorade,2
-8/6/2025 19:00:00,The Bloody Marys,1,Captain Munch,2
-8/6/2025 19:20:00,Purple P***y Eaters,4,Yolked & Choked,2
-8/6/2025 19:20:00,Ferociously Fruity Pebbles,1,Cinnamint Toast Munch,3
-8/6/2025 19:40:00,GayTorade,1,Green Eggs and Sam,3
-8/6/2025 19:40:00,Dark Roast Doms,2,Jolly Green Gays,3
-8/6/2025 20:00:00,The Bloody Marys,1,Purple P***y Eaters,3
-8/6/2025 20:00:00,Captain Munch,1,Cinnamint Toast Munch,1
-8/6/2025 20:20:00,Yolked & Choked,2,Dark Roast Doms,4
-8/6/2025 20:20:00,Green Eggs and Sam,1,Ferociously Fruity Pebbles,2
-8/10/2025 15:30:00,Loose Screw,3,Stud Finder,2
-8/10/2025 15:30:00,Tool Belt,3,Drill,2
-8/10/2025 15:50:00,Stud Finder,2,Tool Belt,1
-8/10/2025 15:50:00,Drill,3,Loose Screw,1
-8/10/2025 16:10:00,Tool Belt,2,Loose Screw,1
-8/10/2025 16:10:00,Stud Finder,4,Drill,1
-8/10/25 17:00,Sizzorhood,2,Sticky Fingers,3
-8/10/25 17:00,Better Late Than Never,0,Clit Bait,5
-8/10/25 17:25,Sticky Fingers,4,Substantial Women,2
-8/10/25 17:25,Clit Bait,4,The Fantastic Flore,1
-8/10/25 17:50,Substantial Women,5,The Fantastic Flore,2
-8/10/25 17:50,Sizzorhood,3,Better Late Than Never,2
-8/10/25 18:15,Substantial Women,5,Clit Bait,2
-8/10/25 18:15,Better Late Than Never,4,Sticky Fingers,1
-8/10/25 18:55,The Fantastic Flore,2,Sizzorhood,3
-8/10/25 18:55,Better Late Than Never,4,Substantial Women,2
-8/10/25 19:20,Sticky Fingers,4,The Fantastic Flore,1
-8/10/25 19:20,Sizzorhood,5,Clit Bait,1
-8/10/25 19:45,Clit Bait,4,Sticky Fingers,2
-8/10/25 19:45,Substantial Women,2,Sizzorhood,5
-8/10/25 20:10,The Fantastic Flore,5,Better Late Than Never,1
-8/13/2025 19:00:00,Jolly Green Gays,3,Purple P***y Eaters,1
-8/13/2025 19:00:00,Captain Munch,4,Ferociously Fruity Pebbles,1
-8/13/2025 19:20:00,Cinnamint Toast Munch,4,GayTorade,0
-8/13/2025 19:20:00,Green Eggs and Sam,2,Dark Roast Doms,2
-8/13/2025 19:40:00,Jolly Green Gays,1,The Bloody Marys,2
-8/13/2025 19:40:00,Yolked & Choked,1,Captain Munch,3
-8/13/2025 20:00:00,Green Eggs and Sam,2,Purple P***y Eaters,1
-8/13/2025 20:00:00,GayTorade,2,Ferociously Fruity Pebbles,2
-8/13/2025 20:20:00,Yolked & Choked,1,The Bloody Marys,4
-8/13/2025 20:20:00,Dark Roast Doms,1,Cinnamint Toast Munch,2
+Time,Team 1,Score 1,Team 2,Score 2,Outcome Only,Tournament
+7/20/2025 15:30:00,Drill,2,Tool Belt,3,,
+7/20/2025 15:30:00,Stud Finder,3,Loose Screw,1,,
+7/20/2025 15:50:00,Stud Finder,3,Tool Belt,2,,
+7/20/2025 15:50:00,Loose Screw,2,Drill,3,,
+7/20/2025 16:10:00,Tool Belt,3,Loose Screw,2,,
+7/20/2025 16:10:00,Drill,3,Stud Finder,1,,
+7/23/2025 19:00:00,The Bloody Marys,1,Cinnamint Toast Munch,2,,
+7/23/2025 19:00:00,GayTorade,0,Dark Roast Doms,4,,
+7/23/2025 19:20:00,Purple P***y Eaters,2,Ferociously Fruity Pebbles,2,,
+7/23/2025 19:20:00,Green Eggs and Sam,2,Jolly Green Gays,3,,
+7/23/2025 19:40:00,Cinnamint Toast Munch,0,Yolked & Choked,4,,
+7/23/2025 19:40:00,Dark Roast Doms,3,Captain Munch,1,,
+7/23/2025 20:00:00,Ferociously Fruity Pebbles,0,The Bloody Marys,4,,
+7/23/2025 20:00:00,GayTorade,1,Purple P***y Eaters,3,,
+7/23/2025 20:20:00,Yolked & Choked,3,Green Eggs and Sam,1,,
+7/23/2025 20:20:00,Captain Munch,3,Jolly Green Gays,1,,
+7/27/2025 15:30:00,Loose Screw,2,Tool Belt,4,,
+7/27/2025 15:30:00,Stud Finder,3,Drill,2,,
+7/27/2025 15:50:00,Drill,0,Loose Screw,5,,
+7/27/2025 15:50:00,Tool Belt,3,Stud Finder,2,,
+7/27/2025 16:10:00,Loose Screw,0,Stud Finder,5,,
+7/27/2025 16:10:00,Tool Belt,1,Drill,4,,
+7/30/2025 19:00:00,GayTorade,1,Yolked & Choked,2,,
+7/30/2025 19:00:00,Cinnamint Toast Munch,4,Green Eggs and Sam,0,,
+7/30/2025 19:20:00,Dark Roast Doms,0,The Bloody Marys,3,,
+7/30/2025 19:20:00,Purple P***y Eaters,0,Captain Munch,5,,
+7/30/2025 19:40:00,Yolked & Choked,3,Ferociously Fruity Pebbles,0,,
+7/30/2025 19:40:00,Jolly Green Gays,0,Cinnamint Toast Munch,5,,
+7/30/2025 20:00:00,The Bloody Marys,0,GayTorade,3,,
+7/30/2025 20:00:00,Captain Munch,4,Green Eggs and Sam,1,,
+7/30/2025 20:20:00,Purple P***y Eaters,3,Dark Roast Doms,0,,
+7/30/2025 20:20:00,Ferociously Fruity Pebbles,1,Jolly Green Gays,3,,
+8/3/2025 15:30:00,Loose Screw,3,Tool Belt,2,,
+8/3/2025 15:30:00,Drill,2,Stud Finder,3,,
+8/3/2025 15:50:00,Drill,1,Tool Belt,4,,
+8/3/2025 15:50:00,Stud Finder,4,Loose Screw,1,,
+8/3/2025 16:10:00,Tool Belt,5,Stud Finder,1,,
+8/3/2025 16:10:00,Loose Screw,3,Drill,2,,
+8/6/2025 19:00:00,Jolly Green Gays,2,GayTorade,2,,
+8/6/2025 19:00:00,The Bloody Marys,1,Captain Munch,2,,
+8/6/2025 19:20:00,Purple P***y Eaters,4,Yolked & Choked,2,,
+8/6/2025 19:20:00,Ferociously Fruity Pebbles,1,Cinnamint Toast Munch,3,,
+8/6/2025 19:40:00,GayTorade,1,Green Eggs and Sam,3,,
+8/6/2025 19:40:00,Dark Roast Doms,2,Jolly Green Gays,3,,
+8/6/2025 20:00:00,The Bloody Marys,1,Purple P***y Eaters,3,,
+8/6/2025 20:00:00,Captain Munch,1,Cinnamint Toast Munch,1,,
+8/6/2025 20:20:00,Yolked & Choked,2,Dark Roast Doms,4,,
+8/6/2025 20:20:00,Green Eggs and Sam,1,Ferociously Fruity Pebbles,2,,
+8/10/2025 15:30:00,Loose Screw,3,Stud Finder,2,,
+8/10/2025 15:30:00,Tool Belt,3,Drill,2,,
+8/10/2025 15:50:00,Stud Finder,2,Tool Belt,1,,
+8/10/2025 15:50:00,Drill,3,Loose Screw,1,,
+8/10/2025 16:10:00,Tool Belt,2,Loose Screw,1,,
+8/10/2025 16:10:00,Stud Finder,4,Drill,1,,
+8/10/2025 17:00:00,Sizzorhood,2,Sticky Fingers,3,,
+8/10/2025 17:00:00,Better Late Than Never,0,Clit Bait,5,,
+8/10/2025 17:25:00,Sticky Fingers,4,Substantial Women,2,,
+8/10/2025 17:25:00,Clit Bait,4,The Fantastic Flore,1,,
+8/10/2025 17:50:00,Substantial Women,5,The Fantastic Flore,2,,
+8/10/2025 17:50:00,Sizzorhood,3,Better Late Than Never,2,,
+8/10/2025 18:15:00,Substantial Women,5,Clit Bait,2,,
+8/10/2025 18:15:00,Better Late Than Never,4,Sticky Fingers,1,,
+8/10/2025 18:55:00,The Fantastic Flore,2,Sizzorhood,3,,
+8/10/2025 18:55:00,Better Late Than Never,4,Substantial Women,2,,
+8/10/2025 19:20:00,Sticky Fingers,4,The Fantastic Flore,1,,
+8/10/2025 19:20:00,Sizzorhood,5,Clit Bait,1,,
+8/10/2025 19:45:00,Clit Bait,4,Sticky Fingers,2,,
+8/10/2025 19:45:00,Substantial Women,2,Sizzorhood,5,,
+8/10/2025 20:10:00,The Fantastic Flore,5,Better Late Than Never,1,,
+8/13/2025 19:00:00,Jolly Green Gays,3,Purple P***y Eaters,1,,
+8/13/2025 19:00:00,Captain Munch,4,Ferociously Fruity Pebbles,1,,
+8/13/2025 19:20:00,Cinnamint Toast Munch,4,GayTorade,0,,
+8/13/2025 19:20:00,Green Eggs and Sam,2,Dark Roast Doms,2,,
+8/13/2025 19:40:00,Jolly Green Gays,1,The Bloody Marys,2,,
+8/13/2025 19:40:00,Yolked & Choked,1,Captain Munch,3,,
+8/13/2025 20:00:00,Green Eggs and Sam,2,Purple P***y Eaters,1,,
+8/13/2025 20:00:00,GayTorade,2,Ferociously Fruity Pebbles,2,,
+8/13/2025 20:20:00,Yolked & Choked,1,The Bloody Marys,4,,
+8/13/2025 20:20:00,Dark Roast Doms,1,Cinnamint Toast Munch,2,,
+8/17/2025 15:30:00,Drill,2,Stud Finder,2,,
+8/17/2025 15:30:00,Loose Screw,2,Tool Belt,1,,
+8/17/2025 15:50:00,Drill,0,Tool Belt,5,,
+8/17/2025 15:50:00,Stud Finder,3,Loose Screw,1,,
+8/17/2025 16:10:00,Tool Belt,3,Stud Finder,1,,
+8/17/2025 16:10:00,Loose Screw,0,Drill,3,,
+8/17/2025 17:00:00,Substantial Women,1,Better Late Than Never,0,1,1
+8/17/2025 17:00:00,Sticky Fingers,1,The Fantastic Flore,0,1,1
+8/17/2025 17:25:00,Substantial Women,1,Sizzorhood,0,1,1
+8/17/2025 17:25:00,Sticky Fingers,0,Clit Bait,1,1,1
+8/17/2025 17:50:00,Sticky Fingers,1,Better Late Than Never,0,1,1
+8/17/2025 17:50:00,The Fantastic Flore,0,Sizzorhood,1,1,1
+8/17/2025 18:15:00,Substantial Women,0,Clit Bait,1,1,1
+8/17/2025 18:15:00,Sticky Fingers,1,Sizzorhood,0,1,1
+8/17/2025 18:40:00,Substantial Women,1,Sticky Fingers,0,1,1
+8/17/2025 19:05:00,Substantial Women,0,Clit Bait,1,1,1
+8/20/2025 19:00:00,Yolked & Choked,2,Jolly Green Gays,3,,
+8/20/2025 19:00:00,Captain Munch,2,GayTorade,2,,
+8/20/2025 19:20:00,Cinnamint Toast Munch,4,The Bloody Marys,2,,
+8/20/2025 19:20:00,Ferociously Fruity Pebbles,2,Purple P***y Eaters,2,,
+8/20/2025 19:40:00,Green Eggs and Sam,3,Yolked & Choked,1,,
+8/20/2025 19:40:00,Dark Roast Doms,5,GayTorade,1,,
+8/20/2025 20:00:00,Jolly Green Gays,3,Captain Munch,1,,
+8/20/2025 20:00:00,Purple P***y Eaters,0,Cinnamint Toast Munch,4,,
+8/20/2025 20:20:00,The Bloody Marys,1,Green Eggs and Sam,1,,
+8/20/2025 20:20:00,Ferociously Fruity Pebbles,0,Dark Roast Doms,3,,
+8/24/2025 15:30:00,Drill,1,Loose Screw,2,,
+8/24/2025 15:30:00,Stud Finder,2,Tool Belt,2,,
+8/24/2025 15:50:00,Tool Belt,3,Loose Screw,2,,
+8/24/2025 15:50:00,Stud Finder,4,Drill,1,,
+8/24/2025 16:10:00,Tool Belt,3,Drill,2,,
+8/24/2025 16:10:00,Loose Screw,2,Stud Finder,2,,

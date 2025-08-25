@@ -5,7 +5,10 @@ import os
 
 INITIAL_ELO = 1000
 K_FACTOR = 250
-TEAMS = 'Teams.csv'
+TOURNAMENT_MULTIPLIER = 2.0  # Set as needed
+
+
+TEAMS = 'Sports Elo - Teams.csv'
 GAMES = 'Sports Elo - Games.csv'
 
 def load_teams(filename):
@@ -25,8 +28,13 @@ def load_games(filename):
     games = []
     with open(filename, newline='', encoding='utf-8') as f:
         reader = csv.reader(f)
+        header = next(reader)  # skip header
         for row in reader:
-            if len(row) == 5:
+            # Accept rows with at least 5 columns, up to 7
+            if len(row) >= 5:
+                # Pad to 7 columns
+                while len(row) < 7:
+                    row.append("")
                 games.append(row)
     return games
 
@@ -39,6 +47,7 @@ def get_all_players(team_to_players):
 def average_elo(players, elos):
     return sum(elos[p] for p in players) / len(players) if players else INITIAL_ELO
 
+
 def mov_factor(goal_diff):
     if goal_diff <= 0:  # tie
         return 1
@@ -48,6 +57,27 @@ def mov_factor(goal_diff):
         return 1.5
     else:  # goal_diff >= 3
         return (11 + goal_diff) / 8
+
+def update_elo_custom(team1, team2, score1, score2, elos, K=20, margin_override=None, multiplier=1.0):
+    avg1 = average_elo(team1, elos)
+    avg2 = average_elo(team2, elos)
+    expected1 = 1 / (1 + 10 ** ((avg2 - avg1) / 400))
+    expected2 = 1 - expected1
+    if score1 > score2:
+        actual1, actual2 = 1, 0
+    elif score1 < score2:
+        actual1, actual2 = 0, 1
+    else:
+        actual1, actual2 = 0.5, 0.5
+    margin = abs(score1 - score2) if margin_override is None else margin_override
+    G = mov_factor(margin)
+    change1 = K * G * (actual1 - expected1) * multiplier
+    change2 = K * G * (actual2 - expected2) * multiplier
+    for p in team1:
+        elos[p] += change1 / len(team1)
+    for p in team2:
+        elos[p] += change2 / len(team2)
+    return elos
 
 
 def update_elo(team1, team2, score1, score2, elos, K=20):
@@ -114,15 +144,42 @@ def main():
     team_high = {team: (INITIAL_ELO, None) for team in team_to_players}
     team_low = {team: (INITIAL_ELO, None) for team in team_to_players}
 
+    running_margin_sum = 0
+    running_margin_count = 0
     for row in games:
-        time, t1, s1, t2, s2 = row
-        s1, s2 = int(s1), int(s2)
+        time, t1, s1, t2, s2, outcome_flag, tourney_flag = row[:7]
+        # If outcome_flag (col 6) is set, use running average margin (rounded)
+        if outcome_flag.strip():
+            if running_margin_count > 0:
+                margin = int(round(running_margin_sum / running_margin_count))
+            else:
+                margin = 1  # fallback if no games yet
+            # Assign winner/loser based on s1/s2 (should be 1/0 or 0/1)
+            try:
+                s1, s2 = int(s1), int(s2)
+            except Exception:
+                s1, s2 = 1, 0
+            if s1 > s2:
+                s1, s2 = margin, 0
+            elif s2 > s1:
+                s1, s2 = 0, margin
+            else:
+                s1 = s2 = 0  # tie, but margin=0
+        else:
+            s1, s2 = int(s1), int(s2)
+            margin = abs(s1 - s2)
+            if margin > 0:
+                running_margin_sum += margin
+                running_margin_count += 1
         team1 = team_to_players.get(t1, [])
         team2 = team_to_players.get(t2, [])
         # Get team ELOs before game
         team1_elo_before = average_elo(team1, elos)
         team2_elo_before = average_elo(team2, elos)
-        update_elo(team1, team2, s1, s2, elos, K=K_FACTOR)
+        # Tournament multiplier
+        multiplier = TOURNAMENT_MULTIPLIER if tourney_flag.strip() else 1.0
+        # Use custom update_elo
+        update_elo_custom(team1, team2, s1, s2, elos, K=K_FACTOR, margin_override=margin, multiplier=multiplier)
         # Get team ELOs after game
         team1_elo_after = average_elo(team1, elos)
         team2_elo_after = average_elo(team2, elos)
