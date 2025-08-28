@@ -2,6 +2,7 @@ import csv
 from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.dates import DateFormatter
+import matplotlib.patheffects as pe
 import numpy as np
 
 ELO_RESULTS = 'elo_results.csv'
@@ -71,16 +72,26 @@ def invert_teams(team_to_players):
 
 INITIAL_ELO = 1000  # Same as in calculate_elo.py
 
-def plot_player_elo(player, dates, elo_data):
-    plt.figure(figsize=(12, 6))
+def plot_player_elo(player, dates, elo_data, team_to_players=None, games=None):
+    # Make room on the right for an external legend (match team plot layout)
+    plt.figure(figsize=(15, 6))
+    
+    # Create main plot area (use 60% width so legend can sit on the right)
+    plt.axes([0.1, 0.1, 0.6, 0.8])
+    
+    # Plot player line
     plt.plot(dates, elo_data[player], 'b-', label='ELO')
+    # mark player's first and last ELO with dots (no legend entries)
+    plt.scatter(dates[0], elo_data[player][0], color='b', s=50, zorder=4, label='_nolegend_',
+                edgecolors='white', linewidths=0.8)
+    plt.scatter(dates[-1], elo_data[player][-1], color='b', s=50, zorder=4, label='_nolegend_',
+                edgecolors='white', linewidths=0.8)
     plt.axhline(y=1000, color='r', linestyle='--', label='Starting ELO')
     
     plt.title(f'{player} ELO History')
     plt.xlabel('Date')
     plt.ylabel('ELO Rating')
     plt.grid(True, alpha=0.3)
-    plt.legend()
     
     # Format x-axis dates
     plt.gcf().autofmt_xdate()
@@ -90,22 +101,134 @@ def plot_player_elo(player, dates, elo_data):
     # Add some padding to y-axis
     plt.margins(y=0.1)
     
-    plt.tight_layout()
+    # If team and game info provided, plot team-average ELOs for teams the player belonged to
+    if team_to_players and games:
+        # find teams the player is/was on
+        player_teams = [t for t, members in team_to_players.items() if player in members]
+        cmap = plt.get_cmap('tab10')
+        for ti, team in enumerate(player_teams):
+            # find team's games
+            team_games = [g for g in games if g[1] == team or g[2] == team]
+            if not team_games:
+                continue
+            first_game = min(g[0] for g in team_games)
+            last_game = max(g[0] for g in team_games)
+
+            # determine indices for date range
+            try:
+                start_idx = next(i for i, d in enumerate(dates) if d >= first_game)
+            except StopIteration:
+                start_idx = 0
+            try:
+                end_idx = max(i for i, d in enumerate(dates) if d <= last_game)
+            except ValueError:
+                end_idx = len(dates) - 1
+
+            # compute team average over that window
+            members = [p for p in team_to_players.get(team, []) if p in elo_data]
+            if not members:
+                continue
+            team_segment = []
+            for i in range(start_idx, end_idx + 1):
+                team_segment.append(sum(elo_data[p][i] for p in members) / len(members))
+
+            seg_dates = dates[start_idx:end_idx + 1]
+            color = cmap(ti % 10)
+            # plot team segment without adding to legend
+            plt.plot(seg_dates, team_segment, color=color, linestyle='--', linewidth=2, label='_nolegend_')
+            # mark the segment start and end and annotate the team name inline for clarity
+            y_first_seg = team_segment[0]
+            y_last_seg = team_segment[-1]
+            plt.scatter(seg_dates[0], y_first_seg, color=color, s=40, zorder=3, label='_nolegend_',
+                        edgecolors='white', linewidths=0.8)
+            plt.scatter(seg_dates[-1], y_last_seg, color=color, s=40, zorder=3, label='_nolegend_',
+                        edgecolors='white', linewidths=0.8)
+            plt.gca().annotate(
+                team,
+                xy=(seg_dates[-1], y_last_seg),
+                xytext=(6, 0),
+                textcoords='offset points',
+                va='center',
+                fontsize='small',
+                color=color,
+                clip_on=False,
+                path_effects=[pe.withStroke(linewidth=3, foreground='white')]
+            )
+
+    # Place legend outside of the plot on the right (includes player, starting ELO, and team segments)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., ncol=1, fontsize='small')
+
     plt.show()
 
 def plot_team_elo(team, dates, elo_data, team_to_players, games):
-    plt.figure(figsize=(12, 6))
+    # Create figure with extra width for legend
+    plt.figure(figsize=(15, 6))
     
-    # Calculate team ELO for each date
+    # Create the main plot area with adjusted size to accommodate legend
+    main_plot = plt.axes([0.1, 0.1, 0.6, 0.8])
+    
+    # Calculate and plot individual player ELOs
+    players = team_to_players[team]
+    valid_players = [p for p in players if p in elo_data]
+    
+    # Generate a color map for players
+    colors = plt.cm.rainbow(np.linspace(0, 1, len(valid_players)))
+    
+    # Plot individual player lines (no legend entries) and add inline labels at the right edge
+    label_positions = []  # list of (y, player, color)
+    for player, color in zip(valid_players, colors):
+        # plot the line without adding it to the legend
+        line, = plt.plot(dates, elo_data[player], color=color, alpha=0.8, linewidth=1.5, label='_nolegend_')
+        # mark the first and last points
+        y_first = elo_data[player][0]
+        y_last = elo_data[player][-1]
+        plt.scatter(dates[0], y_first, color=color, s=30, zorder=3, label='_nolegend_', edgecolors='white', linewidths=0.6)
+        plt.scatter(dates[-1], y_last, color=color, s=30, zorder=3, label='_nolegend_', edgecolors='white', linewidths=0.6)
+        # record label position for later collision avoidance
+        label_positions.append((y_last, player, color))
+
+    # Simple collision avoidance for right-edge labels: sort by y and nudge if too close
+    if label_positions:
+        label_positions.sort(key=lambda x: x[0])
+        adjusted_positions = []
+        min_sep = max(6, (plt.ylim()[1] - plt.ylim()[0]) * 0.02)  # minimal separation in data units
+        for y, player, color in label_positions:
+            if not adjusted_positions:
+                adjusted_positions.append([y, player, color])
+            else:
+                prev_y = adjusted_positions[-1][0]
+                if y - prev_y < min_sep:
+                    y = prev_y + min_sep
+                adjusted_positions.append([y, player, color])
+
+        # place annotations using adjusted positions
+        for y, player, color in adjusted_positions:
+            plt.gca().annotate(
+                player,
+                xy=(dates[-1], y),
+                xytext=(6, 0),
+                textcoords='offset points',
+                va='center',
+                fontsize='small',
+                color=color,
+                clip_on=False,
+                path_effects=[pe.withStroke(linewidth=3, foreground='white')]
+            )
+    
+    # Calculate and plot team average ELO
     team_elos = []
     for i, date in enumerate(dates):
-        players = team_to_players[team]
-        valid_players = [p for p in players if p in elo_data]
         if valid_players:
             avg_elo = sum(elo_data[p][i] for p in valid_players) / len(valid_players)
             team_elos.append(avg_elo)
         else:
             team_elos.append(1000)  # Default ELO if no valid players
+    
+    # Plot team average with thick line
+    plt.plot(dates, team_elos, 'k-', linewidth=2.5, label=f'{team} (Team Average)')
+    # Mark the start and end of the team average with dots
+    plt.scatter(dates[0], team_elos[0], color='k', s=50, zorder=4, label='_nolegend_', edgecolors='white', linewidths=0.8)
+    plt.scatter(dates[-1], team_elos[-1], color='k', s=50, zorder=4, label='_nolegend_', edgecolors='white', linewidths=0.8)
     
     # Find team's first and last game
     team_games = [game for game in games if game[1] == team or game[2] == team]
@@ -118,15 +241,16 @@ def plot_team_elo(team, dates, elo_data, team_to_players, games):
         plt.axvspan(first_game, last_game, color='lightblue', alpha=0.3, label='Active Period')
         plt.axvspan(last_game, dates[-1], color='gray', alpha=0.15, label='After Last Game')
     
-    # Plot ELO line
-    plt.plot(dates, team_elos, 'b-', label='Team ELO', linewidth=2)
     plt.axhline(y=1000, color='r', linestyle='--', label='Starting ELO')
     
     plt.title(f'{team} ELO History')
     plt.xlabel('Date')
     plt.ylabel('Team ELO Rating')
     plt.grid(True, alpha=0.3)
-    plt.legend()
+    
+    # Place legend outside of the plot on the right
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., 
+              ncol=1, fontsize='small')
     
     # Format x-axis dates
     plt.gcf().autofmt_xdate()
@@ -136,7 +260,6 @@ def plot_team_elo(team, dates, elo_data, team_to_players, games):
     # Add some padding to y-axis
     plt.margins(y=0.1)
     
-    plt.tight_layout()
     plt.show()
 
 def main():
@@ -262,7 +385,7 @@ def main():
 
                         # Show ELO history graph
             if player in elo_data:
-                plot_player_elo(player, dates, elo_data)
+                plot_player_elo(player, dates, elo_data, team_to_players=team_to_players, games=games)
         else:
             print("Unknown command. Use 'team TEAMNAME' or 'player PLAYERNAME'.")
 
