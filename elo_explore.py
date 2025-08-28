@@ -1,19 +1,36 @@
 import csv
+from datetime import datetime
 
 ELO_RESULTS = 'elo_results.csv'
 TEAMS_FILE = 'Sports Elo - Teams.csv'
+GAMES_FILE = 'Sports Elo - Games.csv'
+
+def load_games(filename):
+    games = []  # [(date, team1, team2), ...]
+    with open(filename, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                # Parse the full datetime string
+                date = datetime.strptime(row['Time'], '%m/%d/%Y %H:%M:%S')
+                team1 = row['Team 1'].strip()
+                team2 = row['Team 2'].strip()
+                if team1 and team2:  # Only add if both teams are present
+                    games.append((date, team1, team2))
+            except (ValueError, KeyError) as e:
+                print(f"Error parsing row ({str(e)}): {row}")
+                continue
+    return sorted(games)  # Sort by date
 
 def load_elo_results(filename):
     with open(filename, newline='', encoding='utf-8') as f:
         reader = csv.reader(f)
         header = next(reader)
-        last_row = None
-        for row in reader:
-            last_row = row
-        if last_row is None:
+        rows = list(reader)  # Read all rows
+        if not rows:
             raise ValueError('No data in ELO results')
-        # Map player name to ELO
-        return dict(zip(header[1:], map(float, last_row[1:])))
+        # Return header and all rows for history tracking
+        return header[1:], rows
 
 def load_teams(filename):
     with open(filename, newline='', encoding='utf-8') as f:
@@ -34,9 +51,41 @@ def invert_teams(team_to_players):
     return player_to_teams
 
 def main():
-    elos = load_elo_results(ELO_RESULTS)
+    header, rows = load_elo_results(ELO_RESULTS)
     team_to_players = load_teams(TEAMS_FILE)
     player_to_teams = invert_teams(team_to_players)
+    games = load_games(GAMES_FILE)
+    
+    print(f"Found {len(rows)} ELO records and {len(games)} games in history")
+    
+    # Get current ELOs from last row
+    last_row = rows[-1]
+    current_elos = dict(zip(header, map(float, last_row[1:])))
+    
+    # Create date -> elos mapping for historical lookups
+    date_to_elos = {}
+    for row in rows:
+        date_str = row[0]
+        try:
+            # Try parsing as datetime first (m/d/Y H:M:S)
+            date = datetime.strptime(date_str, '%m/%d/%Y %H:%M:%S').date()
+        except ValueError:
+            try:
+                # Fall back to date-only format (Y-m-d)
+                date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            except ValueError as e:
+                print(f"Warning: Could not parse ELO date {date_str}: {e}")
+                continue
+        date_to_elos[date] = dict(zip(header, map(float, row[1:])))
+    
+    # Find last game for each team
+    team_last_game = {}  # {team: (date, opponent)}
+    for game_date, team1, team2 in reversed(games):  # Go backwards to find most recent first
+        if team1 not in team_last_game:
+            team_last_game[team1] = (game_date, team2)
+        if team2 not in team_last_game:
+            team_last_game[team2] = (game_date, team1)
+    
     print("Type 'team TEAMNAME' to see ELOs of all members, or 'player PLAYERNAME' to see all teams and ELOs for that player. Type 'exit' to quit.")
     while True:
         cmd = input('> ').strip()
@@ -47,32 +96,69 @@ def main():
             if team not in team_to_players:
                 print(f"Team '{team}' not found.")
                 continue
-            # Print team ELO (average of members)
+            
+            # Show last game ELO if available
+            if team in team_last_game:
+                last_game_date, opponent = team_last_game[team]
+                # Find ELOs from that date
+                # Convert last_game_date to just the date part for lookup
+                lookup_date = last_game_date.date()
+                if lookup_date in date_to_elos:
+                    historical_elos = date_to_elos[lookup_date]
+                    # Calculate team ELO for that game
+                    historical_players = [p for p in team_to_players[team] if p in historical_elos]
+                    if historical_players:
+                        last_game_elo = sum(historical_elos[p] for p in historical_players) / len(historical_players)
+                        print(f"\nLast Game: vs {opponent} on {last_game_date.strftime('%m/%d/%Y %I:%M %p')}")
+                        print(f"Team ELO in that game: {last_game_elo:.2f}")
+                        print("Players in that game:")
+                        for p in sorted(historical_players):
+                            print(f"  {p}: {historical_elos[p]:.2f}")
+            
+            # Print current team ELO (average of current members)
             members = team_to_players[team]
-            member_elos = [elos.get(p) for p in members if p in elos]
+            member_elos = [current_elos.get(p) for p in members if p in current_elos]
             if member_elos:
                 avg_elo = sum(member_elos) / len(member_elos)
-                print(f"Team {team} average ELO: {avg_elo:.2f}")
+                print(f"Current Team Average ELO: {avg_elo:.2f}")
             else:
-                print(f"Team {team} has no ELO data.")
-            print(f"ELOs for team {team}:")
-            for p in members:
-                print(f"  {p}: {elos.get(p, 'N/A')}")
+                print("No ELO data available for current roster")
+            
+            print("\nCurrent Roster:")
+            for p in sorted(members):
+                print(f"  {p}: {current_elos.get(p, 'N/A')}")
         elif cmd.lower().startswith('player '):
             player = cmd[7:].strip()
             if player not in player_to_teams:
                 print(f"Player '{player}' not found.")
                 continue
-            print(f"Player {player} ELO: {elos.get(player, 'N/A')}")
-            print(f"Teams for player {player}:")
-            for t in player_to_teams[player]:
+            print(f"\nPlayer {player} ELO: {current_elos.get(player, 'N/A')}")
+            print(f"\nTeams:")
+            for t in sorted(player_to_teams[player]):
+                print(f"\n{t}:")
+                
+                # Calculate current team ELO
                 members = team_to_players[t]
-                member_elos = [elos.get(p) for p in members if p in elos]
-                if member_elos:
-                    avg_elo = sum(member_elos) / len(member_elos)
-                    print(f"  {t}: avg ELO {avg_elo:.2f}")
+                current_member_elos = [current_elos.get(p) for p in members if p in current_elos]
+                if current_member_elos:
+                    current_avg = sum(current_member_elos) / len(current_member_elos)
+                    print(f"  Current Team ELO: {current_avg:.2f}")
                 else:
-                    print(f"  {t}: avg ELO N/A")
+                    print("  Current Team ELO: N/A")
+                
+                # Show last game information
+                if t in team_last_game:
+                    last_game_date, opponent = team_last_game[t]
+                    lookup_date = last_game_date.date()
+                    if lookup_date in date_to_elos:
+                        historical_elos = date_to_elos[lookup_date]
+                        # Calculate historical team ELO
+                        historical_players = [p for p in team_to_players[t] if p in historical_elos]
+                        if historical_players:
+                            last_game_elo = sum(historical_elos[p] for p in historical_players) / len(historical_players)
+                            print(f"  Last Game ELO ({last_game_date.strftime('%m/%d/%Y')}): {last_game_elo:.2f}")
+                else:
+                    print("  No previous game data")
         else:
             print("Unknown command. Use 'team TEAMNAME' or 'player PLAYERNAME'.")
 

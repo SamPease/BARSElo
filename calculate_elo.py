@@ -221,13 +221,41 @@ def main():
         # Save ELOs after this game for all players
         row_out = [time] + [round(elos[p], 2) for p in all_players]
         elo_history.append(row_out)
-    # Print record high/low team ELOs
-    print("\nRecord High Team ELOs:")
-    for team, (elo, t) in sorted(team_high.items(), key=lambda x: -x[1][0]):
-        print(f"{team}: {elo:.2f} at {t}")
-    print("\nRecord Low Team ELOs:")
-    for team, (elo, t) in sorted(team_low.items(), key=lambda x: x[1][0]):
-        print(f"{team}: {elo:.2f} at {t}")
+    # Get current team ELOs
+    current_team_elos = {}
+    last_game_team_elos = {}
+    for team, players in team_to_players.items():
+        if players:
+            # Current ELO
+            valid_players = [p for p in players if p in elos]
+            if valid_players:
+                current_team_elos[team] = sum(elos[p] for p in valid_players) / len(valid_players)
+            
+            # Last game ELO
+            if team_elo_history[team]:  # If the team has played any games
+                last_game_team_elos[team] = team_elo_history[team][-1][1]  # Get the ELO from their last game
+
+    # Print top 10 teams by current ELO
+    print("\nTop 10 Teams by Current ELO:")
+    for team, elo in sorted(current_team_elos.items(), key=lambda x: x[1], reverse=True)[:10]:
+        print(f"{team}: {elo:.2f}")
+    
+    # Print bottom 10 teams by current ELO
+    print("\nBottom 10 Teams by Current ELO:")
+    for team, elo in sorted(current_team_elos.items(), key=lambda x: x[1])[:10]:
+        print(f"{team}: {elo:.2f}")
+
+    # Print top 10 teams by last game ELO
+    print("\nTop 10 Teams by Last Game ELO:")
+    for team, elo in sorted(last_game_team_elos.items(), key=lambda x: x[1], reverse=True)[:10]:
+        last_game_time = team_elo_history[team][-1][0]  # Get the time of their last game
+        print(f"{team}: {elo:.2f} (last played {last_game_time})")
+    
+    # Print bottom 10 teams by last game ELO
+    print("\nBottom 10 Teams by Last Game ELO:")
+    for team, elo in sorted(last_game_team_elos.items(), key=lambda x: x[1])[:10]:
+        last_game_time = team_elo_history[team][-1][0]  # Get the time of their last game
+        print(f"{team}: {elo:.2f} (last played {last_game_time})")
 
     # Print record high/low individual ELOs
     print("\nRecord High Individual ELOs:")
@@ -258,14 +286,38 @@ def main():
         print(f"{player}: {round(elo,2)}")
 
 
-    # Print each team's ELO (average of its players)
-    print("\nTeam ELOs:")
-    for team, players in team_to_players.items():
-        if players:
-            avg = sum(elos[p] for p in players if p in elos) / len([p for p in players if p in elos])
-            print(f"{team}: {round(avg,2)}")
-        else:
+    # Print all teams with both current and last game ELOs
+    print("\nAll Team ELOs (Current / Last Game):")
+    # Use the original order from the CSV file
+    for team in team_to_players.keys():  # This maintains the order from the Teams CSV
+        players = team_to_players[team]
+        if not players:
             print(f"{team}: No players")
+            continue
+            
+        # Get current ELO
+        valid_players = [p for p in players if p in elos]
+        if valid_players:
+            current_elo = sum(elos[p] for p in valid_players) / len(valid_players)
+        else:
+            current_elo = None
+            
+        # Get last game ELO
+        last_game_elo = None
+        last_game_time = None
+        if team_elo_history[team]:
+            last_game_time, last_game_elo = team_elo_history[team][-1]
+            
+        # Format the output
+        current_str = f"{current_elo:.2f}" if current_elo is not None else "N/A"
+        if last_game_elo is not None:
+            last_game_str = f"{last_game_elo:.2f} (last played {last_game_time})"
+        else:
+            last_game_str = "No games played"
+            
+        print(f"{team}:")
+        print(f"  Current ELO: {current_str}")
+        print(f"  Last Game:   {last_game_str}")
 
 
 if __name__ == '__main__':
