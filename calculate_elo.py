@@ -2,6 +2,7 @@
 import csv
 from collections import defaultdict
 import os
+from datetime import datetime, timedelta
 
 INITIAL_ELO = 1000
 K_FACTOR = 250
@@ -133,6 +134,24 @@ def main():
 
     output_file = 'elo_results.csv'
     elo_history = []
+    # Prepend a row 20 minutes before the earliest game with everyone at INITIAL_ELO
+    if games:
+        earliest_dt = None
+        for row in games:
+            time_str = row[0]
+            try:
+                dt = datetime.strptime(time_str, '%m/%d/%Y %H:%M:%S')
+            except Exception:
+                # if parsing fails, skip this row
+                continue
+            if earliest_dt is None or dt < earliest_dt:
+                earliest_dt = dt
+        if earliest_dt is not None:
+            initial_dt = earliest_dt - timedelta(minutes=20)
+            initial_time_str = initial_dt.strftime('%m/%d/%Y %H:%M:%S')
+            # create row with INITIAL_ELO for all players in consistent order
+            row_out = [initial_time_str] + [round(INITIAL_ELO, 2) for p in all_players]
+            elo_history.append(row_out)
     elos = defaultdict(lambda: INITIAL_ELO)
     # Track team ELOs after each game
     team_elo_history = {team: [] for team in team_to_players}
