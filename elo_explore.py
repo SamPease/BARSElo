@@ -112,6 +112,13 @@ def plot_player_elo(player, dates, elo_data, team_to_players=None, games=None, t
                 edgecolors='white', linewidths=0.8)
     plt.scatter(plot_dates[-1], plot_elos[-1], color='b', s=50, zorder=4, label='_nolegend_',
                 edgecolors='white', linewidths=0.8)
+    # annotate the ending ELO value
+    try:
+        plt.gca().annotate(f"{plot_elos[-1]:.0f}", xy=(plot_dates[-1], plot_elos[-1]), xytext=(-6, 4),
+                           textcoords='offset points', ha='right', va='bottom', fontsize='small', color='b',
+                           clip_on=False, path_effects=[pe.withStroke(linewidth=3, foreground='white')])
+    except Exception:
+        pass
     plt.axhline(y=1000, color='r', linestyle='--', label='Starting ELO')
     
     plt.title(f'{player} ELO History')
