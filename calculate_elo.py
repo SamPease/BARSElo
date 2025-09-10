@@ -156,6 +156,8 @@ def main():
     # Track team ELOs after each game
     team_elo_history = {team: [] for team in team_to_players}
     team_elo_change = {team: [] for team in team_to_players}
+    # Track the team's starting ELO (ELO immediately before their first game)
+    beginning_team_elos = {team: None for team in team_to_players}
     all_game_elo_changes = []  # (abs_change, time, t1, t2, t1_elo_before, t1_elo_after, t2_elo_before, t2_elo_after, score, t1_change, t2_change)
     # Track record high/low for teams and players
     player_high = {p: (INITIAL_ELO, None) for p in all_players}  # (elo, time)
@@ -195,6 +197,11 @@ def main():
         # Get team ELOs before game
         team1_elo_before = average_elo(team1, elos)
         team2_elo_before = average_elo(team2, elos)
+        # Record starting ELO for teams the first time they appear in a game
+        if t1 in beginning_team_elos and beginning_team_elos[t1] is None:
+            beginning_team_elos[t1] = team1_elo_before
+        if t2 in beginning_team_elos and beginning_team_elos[t2] is None:
+            beginning_team_elos[t2] = team2_elo_before
         # Tournament multiplier
         multiplier = TOURNAMENT_MULTIPLIER if tourney_flag.strip() else 1.0
         # Use custom update_elo
@@ -254,6 +261,19 @@ def main():
             if team_elo_history[team]:  # If the team has played any games
                 last_game_team_elos[team] = team_elo_history[team][-1][1]  # Get the ELO from their last game
 
+    # Fill in beginning ELOs for teams that never played or had no players
+    filled_beginning_team_elos = {}
+    for team, players in team_to_players.items():
+        if beginning_team_elos.get(team) is not None:
+            filled_beginning_team_elos[team] = beginning_team_elos[team]
+            continue
+        # If team never played, treat their "beginning" as their current ELO if available,
+        # otherwise use INITIAL_ELO (teams with no players)
+        if team in current_team_elos:
+            filled_beginning_team_elos[team] = current_team_elos[team]
+        else:
+            filled_beginning_team_elos[team] = float(INITIAL_ELO)
+
     # Print top 10 teams by current ELO
     print("\nTop 10 Teams by Current ELO:")
     for team, elo in sorted(current_team_elos.items(), key=lambda x: x[1], reverse=True)[:10]:
@@ -262,6 +282,16 @@ def main():
     # Print bottom 10 teams by current ELO
     print("\nBottom 10 Teams by Current ELO:")
     for team, elo in sorted(current_team_elos.items(), key=lambda x: x[1])[:10]:
+        print(f"{team}: {elo:.2f}")
+
+    # Print top 10 teams by beginning ELO
+    print("\nTop 10 Teams by Beginning ELO (ELO immediately before first game):")
+    for team, elo in sorted(filled_beginning_team_elos.items(), key=lambda x: x[1], reverse=True)[:10]:
+        print(f"{team}: {elo:.2f}")
+
+    # Print bottom 10 teams by beginning ELO
+    print("\nBottom 10 Teams by Beginning ELO (ELO immediately before first game):")
+    for team, elo in sorted(filled_beginning_team_elos.items(), key=lambda x: x[1])[:10]:
         print(f"{team}: {elo:.2f}")
 
     # Print top 10 teams by last game ELO
@@ -306,37 +336,24 @@ def main():
 
 
     # Print all teams with both current and last game ELOs
-    print("\nAll Team ELOs (Current / Last Game):")
+    # Secondary requirement: when printing all teams at the end, only print the current ELO
+    print("\nAll Team ELOs (Current):")
     # Use the original order from the CSV file
     for team in team_to_players.keys():  # This maintains the order from the Teams CSV
         players = team_to_players[team]
         if not players:
             print(f"{team}: No players")
             continue
-            
+
         # Get current ELO
         valid_players = [p for p in players if p in elos]
         if valid_players:
             current_elo = sum(elos[p] for p in valid_players) / len(valid_players)
+            current_str = f"{current_elo:.2f}"
         else:
-            current_elo = None
-            
-        # Get last game ELO
-        last_game_elo = None
-        last_game_time = None
-        if team_elo_history[team]:
-            last_game_time, last_game_elo = team_elo_history[team][-1]
-            
-        # Format the output
-        current_str = f"{current_elo:.2f}" if current_elo is not None else "N/A"
-        if last_game_elo is not None:
-            last_game_str = f"{last_game_elo:.2f} (last played {last_game_time})"
-        else:
-            last_game_str = "No games played"
-            
-        print(f"{team}:")
-        print(f"  Current ELO: {current_str}")
-        print(f"  Last Game:   {last_game_str}")
+            current_str = "N/A"
+
+        print(f"{team}: {current_str}")
 
 
 if __name__ == '__main__':
