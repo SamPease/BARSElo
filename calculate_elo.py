@@ -335,23 +335,55 @@ def main():
         print(f"{player}: {round(elo,2)}")
 
 
-    # Print all teams with both current and last game ELOs
-    # Secondary requirement: when printing all teams at the end, only print the current ELO
-    print("\nAll Team ELOs (Current):")
-    # Use the original order from the CSV file
-    for team in team_to_players.keys():  # This maintains the order from the Teams CSV
-        players = team_to_players[team]
-        if not players:
-            print(f"{team}: No players")
-            continue
+    # Print all teams with current ELOs, sorted by last game time (most recent first).
+    # Teams that have not played are listed after teams that have played, in the
+    # same order they appear in the Teams CSV.
+    print("\nAll Team ELOs (Current), sorted by last game time (least recent first, then most recent). Teams with no games are listed last in CSV order:")
+    # Build original order index map (to preserve CSV order for teams with no games)
+    original_order = {team: idx for idx, team in enumerate(team_to_players.keys())}
 
-        # Get current ELO
+    team_rows = []
+    for team in team_to_players.keys():
+        players = team_to_players[team]
+        # compute current ELO if possible
         valid_players = [p for p in players if p in elos]
         if valid_players:
             current_elo = sum(elos[p] for p in valid_players) / len(valid_players)
-            current_str = f"{current_elo:.2f}"
         else:
+            current_elo = None
+
+        # determine last game time if any
+        last_dt = None
+        if team_elo_history.get(team):
+            # team_elo_history entries are (time_str, elo)
+            last_time_str = team_elo_history[team][-1][0]
+            try:
+                last_dt = datetime.strptime(last_time_str, '%m/%d/%Y %H:%M:%S')
+            except Exception:
+                last_dt = None
+
+        team_rows.append((team, current_elo, last_dt, original_order.get(team, 10**9)))
+
+    # Sorting key:
+    # - Teams with a last_dt should come before teams without one
+    # - Among teams with last_dt, sort by last_dt ascending (least recent first)
+    # - For teams without last_dt, sort by their original CSV order
+    def sort_key(item):
+        team, current_elo, last_dt, orig_idx = item
+        if last_dt is not None:
+            # Use timestamp so that older (smaller dt) sorts first
+            return (0, last_dt.timestamp(), orig_idx)
+        else:
+            return (1, orig_idx)
+
+    for team, current_elo, last_dt, _ in sorted(team_rows, key=sort_key):
+        if not team_to_players[team]:
+            print(f"{team}: No players")
+            continue
+        if current_elo is None:
             current_str = "N/A"
+        else:
+            current_str = f"{current_elo:.2f}"
 
         print(f"{team}: {current_str}")
 
