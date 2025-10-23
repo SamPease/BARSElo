@@ -4,7 +4,7 @@ import re
 import argparse
 from bs4 import BeautifulSoup
 
-DATA_DIR = os.path.join('data')
+DATA_DIR = os.path.join('data/teams')
 CSV_FILE = 'Sports Elo - Teams.csv'
 
 def extract_titles_from_html(html_content):
