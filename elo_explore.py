@@ -28,6 +28,34 @@ def load_games(filename):
                     continue
     return sorted(games)  # Sort by date
 
+
+def load_games_with_scores(filename):
+    """Load games including scores: returns list of (date, team1, score1, team2, score2)
+    Skips rows without numeric scores."""
+    games = []
+    with open(filename, newline='', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            if len(row) >= 5:
+                try:
+                    time = row[0].strip()
+                    t1 = row[1].strip()
+                    s1 = row[2].strip()
+                    t2 = row[3].strip()
+                    s2 = row[4].strip()
+                    if not (time and t1 and t2):
+                        continue
+                    # parse datetime and integer scores; skip if scores not integers
+                    date = datetime.strptime(time, '%m/%d/%Y %H:%M:%S')
+                    s1i = int(s1)
+                    s2i = int(s2)
+                    games.append((date, t1, s1i, t2, s2i))
+                except Exception:
+                    # skip rows with parse issues or non-numeric scores
+                    continue
+    return sorted(games)
+
 def load_elo_results(filename):
     with open(filename, newline='', encoding='utf-8') as f:
         reader = csv.reader(f)
@@ -608,6 +636,68 @@ def main():
     for t, fl in list(team_first_last.items()):
         team_first_last[t] = (fl[0], fl[1])
     
+    # Load games with scores for win% calculations
+    games_with_scores = load_games_with_scores(GAMES_FILE)
+
+    # Compute team and player win/loss/draw stats
+    # Each stat dict contains wins, losses, draws, games
+    team_stats = {team: {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0} for team in team_to_players.keys()}
+    player_stats = {}  # player -> {'wins': x, 'losses': y, 'draws': z, 'games': n}
+    player_team_stats = {}  # player -> team -> {'wins','losses','draws','games'}
+    for p in invert_teams(team_to_players):
+        player_stats[p] = {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0}
+        player_team_stats[p] = {}
+        for t in team_to_players.keys():
+            player_team_stats[p][t] = {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0}
+
+    for date, t1, s1, t2, s2 in games_with_scores:
+        # update team counts
+        team_stats.setdefault(t1, {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0})
+        team_stats.setdefault(t2, {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0})
+        team_stats[t1]['games'] += 1
+        team_stats[t2]['games'] += 1
+        if s1 > s2:
+            team_stats[t1]['wins'] += 1
+            team_stats[t2]['losses'] += 1
+        elif s2 > s1:
+            team_stats[t2]['wins'] += 1
+            team_stats[t1]['losses'] += 1
+        else:
+            team_stats[t1]['draws'] += 1
+            team_stats[t2]['draws'] += 1
+
+        # update player counts for members of each team (static rosters)
+        for p in team_to_players.get(t1, []):
+            player_stats.setdefault(p, {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0})
+            player_stats[p]['games'] += 1
+            player_team_stats.setdefault(p, {})
+            player_team_stats[p].setdefault(t1, {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0})
+            player_team_stats[p][t1]['games'] += 1
+            if s1 > s2:
+                player_stats[p]['wins'] += 1
+                player_team_stats[p][t1]['wins'] += 1
+            elif s1 < s2:
+                player_stats[p]['losses'] += 1
+                player_team_stats[p][t1]['losses'] += 1
+            else:
+                player_stats[p]['draws'] += 1
+                player_team_stats[p][t1]['draws'] += 1
+        for p in team_to_players.get(t2, []):
+            player_stats.setdefault(p, {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0})
+            player_stats[p]['games'] += 1
+            player_team_stats.setdefault(p, {})
+            player_team_stats[p].setdefault(t2, {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0})
+            player_team_stats[p][t2]['games'] += 1
+            if s2 > s1:
+                player_stats[p]['wins'] += 1
+                player_team_stats[p][t2]['wins'] += 1
+            elif s2 < s1:
+                player_stats[p]['losses'] += 1
+                player_team_stats[p][t2]['losses'] += 1
+            else:
+                player_stats[p]['draws'] += 1
+                player_team_stats[p][t2]['draws'] += 1
+    
     print("Type 'team TEAMNAME' to see ELOs of all members, 'player PLAYERNAME' to see all teams and ELOs for that player, or 'teams' to plot all teams. Type 'exit' to quit.")
     while True:
         cmd = input('> ').strip()
@@ -667,6 +757,18 @@ def main():
                 print(f"Current Team Average ELO: {avg_elo:.2f}")
             else:
                 print("No ELO data available for current roster")
+
+            # Print win/loss/draw record for the team in W:L:T format
+            tstat = team_stats.get(team, {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0})
+            tg = tstat.get('games', 0)
+            tw = tstat.get('wins', 0)
+            tl = tstat.get('losses', 0)
+            td = tstat.get('draws', 0)
+            if tg > 0:
+                tpct = 100.0 * (tw + 0.5 * td) / tg
+                print(f"Record (W:L:T): {tw}:{tl}:{td}  {tpct:.1f}%")
+            else:
+                print("Record (W:L:T): 0:0:0 N/A")
             
             print("\nCurrent Roster:")
             for p in sorted(members):
@@ -695,6 +797,17 @@ def main():
                 print(f"\nPlayer {player}:")
                 print(f"ELO: {player_elo:.2f}")
                 print(f"Rank: #{rank} out of {total_players} ({percentile:.1f}th percentile)")
+                # Print player's win/loss/draw record (across all teams) in W:L:T format
+                pstat = player_stats.get(player, {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0})
+                pg = pstat.get('games', 0)
+                pw = pstat.get('wins', 0)
+                pl = pstat.get('losses', 0)
+                pd = pstat.get('draws', 0)
+                if pg > 0:
+                    ppct = 100.0 * (pw + 0.5 * pd) / pg
+                    print(f"Record (W:L:T): {pw}:{pl}:{pd}  {ppct:.1f}%")
+                else:
+                    print("Record (W:L:T): 0:0:0 N/A")
                 
 
             else:
@@ -702,7 +815,18 @@ def main():
             
             print(f"\nTeams:")
             for t in sorted(player_to_teams[player]):
-                print(f"\n{t}:")
+                # per-player-per-team stats (W:L:T)
+                pts = player_team_stats.get(player, {}).get(t, {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0})
+                t_games = pts.get('games', 0)
+                t_wins = pts.get('wins', 0)
+                t_losses = pts.get('losses', 0)
+                t_draws = pts.get('draws', 0)
+                if t_games > 0:
+                    t_pct = 100.0 * (t_wins + 0.5 * t_draws) / t_games
+                    team_label = f"{t} ({t_wins}:{t_losses}:{t_draws}) {t_pct:.1f}%"
+                else:
+                    team_label = f"{t} (0:0:0) N/A"
+                print(f"\n{team_label}:")
                 
                 # Calculate current team ELO
                 members = team_to_players[t]
