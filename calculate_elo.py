@@ -133,7 +133,13 @@ def main():
     all_players = get_all_players(team_to_players)
 
     output_file = 'elo_results.csv'
-    elo_history = []
+    # Use an ordered mapping time_str -> row so multiple games sharing the same
+    # timestamp collapse into a single CSV row. When a game at an existing
+    # timestamp is processed, we overwrite the entry with the latest player ELOs
+    # (i.e. the ELOs after applying that game). This yields one row per
+    # timestamp in the output CSV.
+    from collections import OrderedDict
+    elo_history_map = OrderedDict()
     # Prepend a row 20 minutes before the earliest game with everyone at INITIAL_ELO
     if games:
         earliest_dt = None
@@ -151,7 +157,7 @@ def main():
             initial_time_str = initial_dt.strftime('%m/%d/%Y %H:%M:%S')
             # create row with INITIAL_ELO for all players in consistent order
             row_out = [initial_time_str] + [round(INITIAL_ELO, 2) for p in all_players]
-            elo_history.append(row_out)
+            elo_history_map[initial_time_str] = row_out
     elos = defaultdict(lambda: INITIAL_ELO)
     # Track team ELOs after each game
     team_elo_history = {team: [] for team in team_to_players}
@@ -245,8 +251,12 @@ def main():
             if player_low[p][1] is None or p_elo < player_low[p][0]:
                 player_low[p] = (p_elo, time)
         # Save ELOs after this game for all players
+        # After this game, record the current ELOs for all players at this
+        # game's timestamp. If another game occurs at the same timestamp later,
+        # this entry will be overwritten so the final CSV will contain the ELOs
+        # after all games at that timestamp have been applied.
         row_out = [time] + [round(elos[p], 2) for p in all_players]
-        elo_history.append(row_out)
+        elo_history_map[time] = row_out
     # Get current team ELOs
     current_team_elos = {}
     last_game_team_elos = {}
@@ -322,8 +332,25 @@ def main():
     with open(output_file, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['Time'] + all_players)
-        for row in elo_history:
-            writer.writerow(row)
+        # Write rows in chronological order. Parse timestamps to sort reliably
+        # even if the input CSV had them out of order.
+        def _parse_time(ts):
+            try:
+                return datetime.strptime(ts, '%m/%d/%Y %H:%M:%S')
+            except Exception:
+                try:
+                    return datetime.strptime(ts, '%m/%d/%Y')
+                except Exception:
+                    return None
+
+        # Build list of (parsed_dt, time_str) and sort by parsed_dt (None go last)
+        items = []
+        for tstr in elo_history_map.keys():
+            parsed = _parse_time(tstr)
+            items.append((parsed, tstr))
+        items.sort(key=lambda x: (x[0] is None, x[0]))
+        for _, tstr in items:
+            writer.writerow(elo_history_map[tstr])
 
     # Print top 10 and bottom 10 players by ELO
     sorted_players = sorted(elos.items(), key=lambda x: x[1], reverse=True)
