@@ -300,6 +300,9 @@ def compute_team_stats(team_to_players, players, dates, elo_df, games, games_wit
             'last_game_elo': None if last_game_elo is None else round(last_game_elo, 2),
             'beginning_elo': None if beg_elo is None else round(beg_elo, 2),
             'win_pct': None if win_pct is None else round(win_pct, 3),
+            'wins': wins,
+            'losses': rec.get('losses', 0),
+            'draws': draws,
             'games': games_played,
             'members': members,
             'last_played': last_played_str,
@@ -584,6 +587,9 @@ def compute_player_stats(team_to_players, players, dates, elo_df, games, games_w
             'peak_elo': None if player_peak.get(p) is None else round(player_peak.get(p),2),
             'min_elo': None if player_min.get(p) is None else round(player_min.get(p),2),
             'win_pct': None if win_pct is None else round(win_pct,3),
+            'wins': wins,
+            'losses': st.get('losses', 0),
+            'draws': draws,
             'games': games_played,
             'last_played': last_played_str,
             'last_played_dt': last_dt
@@ -827,8 +833,12 @@ def players_table_data(sort_by):
     for rec in records:
         try:
             wp = rec.get('win_pct')
+            # include win% plus W:L:T breakdown
+            wins = rec.get('wins', 0)
+            losses = rec.get('losses', 0)
+            draws = rec.get('draws', 0)
             if wp is not None and not pd.isna(wp):
-                rec['win_pct_display'] = f"{wp*100:.1f}%"
+                rec['win_pct_display'] = f"{wp*100:.1f}% (W:{wins} L:{losses} T:{draws})"
             else:
                 rec['win_pct_display'] = ''
             pname = rec.get('player')
@@ -907,6 +917,9 @@ def render_player_page(player):
             last_str = r.get('last_played')
             elo_val = r.get('current_elo')
             win_pct = r.get('win_pct')
+            wins = int(r.get('wins')) if r.get('wins') is not None else 0
+            losses = int(r.get('losses')) if r.get('losses') is not None else 0
+            draws = int(r.get('draws')) if r.get('draws') is not None else 0
         else:
             # fallback: compute from available structures
             last_dt = None
@@ -922,9 +935,10 @@ def render_player_page(player):
             rec = team_record.get(t, {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0})
             games_played = rec.get('games', 0)
             wins = rec.get('wins', 0)
+            losses = rec.get('losses', 0)
             draws = rec.get('draws', 0)
             win_pct = (wins + 0.5 * draws) / games_played if games_played > 0 else None
-        team_infos.append({'team': t, 'last_dt': last_dt, 'last_str': last_str, 'elo': elo_val, 'win_pct': win_pct})
+        team_infos.append({'team': t, 'last_dt': last_dt, 'last_str': last_str, 'elo': elo_val, 'win_pct': win_pct, 'wins': wins, 'losses': losses, 'draws': draws})
 
     # sort by last_dt (most recent first); None values go to the end
     def _sort_key(x):
@@ -942,7 +956,16 @@ def render_player_page(player):
         url = '/team/' + urllib.parse.quote(tname)
         last_display = tinfo['last_str'] if tinfo['last_str'] else 'Never'
         elo_display = f"{tinfo['elo']:.2f}" if (tinfo['elo'] is not None and not pd.isna(tinfo['elo'])) else 'N/A'
-        win_display = f"{tinfo['win_pct']:.1%}" if (tinfo['win_pct'] is not None and not pd.isna(tinfo['win_pct'])) else 'N/A'
+        try:
+            if tinfo.get('win_pct') is not None and not pd.isna(tinfo.get('win_pct')):
+                w = int(tinfo.get('wins', 0))
+                l = int(tinfo.get('losses', 0))
+                d = int(tinfo.get('draws', 0))
+                win_display = f"{tinfo['win_pct']:.1%} (W:{w} L:{l} T:{d})"
+            else:
+                win_display = 'N/A'
+        except Exception:
+            win_display = 'N/A'
         row = html.Tr([
             html.Td(html.A(tname, href=url, target='_self')),
             html.Td(last_display),
@@ -1289,8 +1312,11 @@ def teams_table_data(sort_by):
     for rec in records:
         try:
             wp = rec.get('win_pct')
+            wins = rec.get('wins', 0)
+            losses = rec.get('losses', 0)
+            draws = rec.get('draws', 0)
             if wp is not None and not pd.isna(wp):
-                rec['win_pct_display'] = f"{wp*100:.1f}%"
+                rec['win_pct_display'] = f"{wp*100:.1f}% (W:{wins} L:{losses} T:{draws})"
             else:
                 rec['win_pct_display'] = ''
             tname = rec.get('team')
@@ -1359,39 +1385,244 @@ def render_team_page(team):
         for i, (p, _) in enumerate(sorted_players, start=1):
             player_rank_map[p] = i
 
-    # Team header: include team ELO and its rank
-    header_lines = [
-        html.P(f"Team: {team}  —  ELO: {current:.2f}" + (f"  Rank: #{ranks['current_rank']}" if ranks.get('current_rank') else ""))
-    ]
+    # Determine team's last-game snapshot position (use team_first_last if available)
+    team_last_game = None
+    try:
+        if team_first_last and team in team_first_last:
+            team_last_game = team_first_last[team][1]
+    except Exception:
+        team_last_game = None
 
-    # Player list with ELO and rank inline (sorted by current ELO desc)
+    # default positions
+    idx = elo_df.index if (elo_df is not None and not elo_df.empty) else []
+    if team_last_game is not None and len(idx) > 0:
+        try:
+            team_last_pos = idx.searchsorted(team_last_game, side='right') - 1
+            if team_last_pos < 0:
+                team_last_pos = 0
+        except Exception:
+            team_last_pos = len(idx) - 1
+    else:
+        team_last_pos = len(idx) - 1 if len(idx) > 0 else None
+
+    # Team ending ELO (at last game) and ranking among teams using df_teams.last_game_elo
+    try:
+        team_row = df_teams.loc[df_teams['team'] == team].iloc[0]
+    except Exception:
+        team_row = None
+
+    # number of teams for ranking
+    total_teams = len(df_teams) if df_teams is not None else 0
+    # ending elo from df_teams (precomputed) falls back to current
+    ending_elo = None
+    ending_rank = None
+    if team_row is not None:
+        try:
+            ending_elo = team_row.get('last_game_elo') if not pd.isna(team_row.get('last_game_elo')) else None
+        except Exception:
+            ending_elo = None
+        try:
+            ending_rank = int(team_row.get('last_game_elo_rank')) if team_row.get('last_game_elo_rank') is not None and not pd.isna(team_row.get('last_game_elo_rank')) else None
+        except Exception:
+            ending_rank = None
+
+    # current elo/rank (as before)
+    cur_elo = current
+    cur_rank = ranks.get('current_rank')
+
+    # compute percentiles
+    def pct_from_rank(rank, total):
+        try:
+            return 100.0 * (total - rank + 1) / total
+        except Exception:
+            return None
+
+    ending_pct = pct_from_rank(ending_rank, total_teams) if ending_rank is not None else None
+    cur_pct = pct_from_rank(cur_rank, total_teams) if cur_rank is not None else None
+
+    # Team header: show ending ELO/rank/percentile then current in parens
+    if ending_elo is not None:
+        header_text = f"Team: {team}  —  Ending ELO: {ending_elo:.2f}"
+        if ending_rank is not None:
+            header_text += f"  Rank: #{ending_rank}/{total_teams} ({ending_pct:.1f}th)"
+    else:
+        header_text = f"Team: {team}  —  Ending ELO: N/A"
+    if cur_elo is not None:
+        header_text += f"  (current: ELO {cur_elo:.2f}"
+        if cur_rank is not None:
+            header_text += f"  Rank: #{cur_rank}/{total_teams} ({cur_pct:.1f}th)"
+        header_text += ")"
+
+    header_lines = [html.P(header_text)]
+
+    # Player list: compute each member's ELO at the team's last game snapshot and sort by that value
     player_lines = []
     if members:
-        # sort members by current elo (missing elos go to the end)
-        def _player_sort_key(p):
-            v = player_current_elos.get(p)
+        # determine snapshot row at team's last game
+        if team_last_pos is not None and elo_df is not None and not elo_df.empty:
+            try:
+                row_at_last = elo_df.iloc[team_last_pos]
+            except Exception:
+                row_at_last = None
+        else:
+            row_at_last = None
+
+        # build global ranking at that snapshot for percentiles/ranks
+        player_rank_at_last = {}
+        total_players_at_last = 0
+        if row_at_last is not None:
+            vals = {p: row_at_last.get(p) for p in elo_df.columns}
+            # filter numeric
+            valid = {p: float(v) for p, v in vals.items() if v is not None and not pd.isna(v)}
+            total_players_at_last = len(valid)
+            sorted_all = sorted(valid.items(), key=lambda x: x[1], reverse=True)
+            for i, (p, _) in enumerate(sorted_all, start=1):
+                player_rank_at_last[p] = i
+
+        # prepare member list with ending and current elos
+        members_info = []
+        for p in members:
+            try:
+                ending_elo = float(row_at_last.get(p)) if (row_at_last is not None and p in row_at_last.index and not pd.isna(row_at_last.get(p))) else None
+            except Exception:
+                ending_elo = None
+            current_elo = player_current_elos.get(p)
+            current_rank = player_rank_map.get(p)
+            ending_rank = player_rank_at_last.get(p)
+            members_info.append({'player': p, 'ending_elo': ending_elo, 'ending_rank': ending_rank, 'current_elo': current_elo, 'current_rank': current_rank})
+
+        # sort members by ending_elo (None -> lowest)
+        def _mi_key(m):
+            v = m.get('ending_elo')
             return v if v is not None else -1e9
 
-        sorted_members = sorted(members, key=_player_sort_key, reverse=True)
-        for p in sorted_members:
-            elo_val = player_current_elos.get(p)
-            rank_val = player_rank_map.get(p)
-            if elo_val is not None:
-                text = f"{p}: ELO {elo_val:.2f}" + (f"  Rank: #{rank_val}" if rank_val else "")
+        members_info.sort(key=_mi_key, reverse=True)
+
+        # format a compact table for members: Player | Ending ELO | Ending Rank | Ending % | Current ELO | Current Rank | Current %
+        table_header = html.Tr([
+            html.Th('Player'), html.Th('Ending ELO'), html.Th('Ending Rank'), html.Th('Ending %'),
+            html.Th('Current ELO'), html.Th('Current Rank'), html.Th('Current %')
+        ])
+        table_rows = []
+        for info in members_info:
+            p = info['player']
+            e = info['ending_elo']
+            er = info.get('ending_rank')
+            ce = info.get('current_elo')
+            cr = info.get('current_rank')
+            # compute pct strings
+            if e is not None and er is not None and total_players_at_last > 0:
+                ending_pct = 100.0 * (total_players_at_last - er + 1) / total_players_at_last
+                ending_pct_s = f"{ending_pct:.1f}%"
+                ending_rank_s = f"#{er}/{total_players_at_last}"
+                ending_elo_s = f"{e:.2f}"
             else:
-                text = f"{p}: ELO N/A"
-            player_lines.append(html.P(text))
+                ending_pct_s = 'N/A'
+                ending_rank_s = 'N/A'
+                ending_elo_s = 'N/A'
+
+            if ce is not None and cr is not None and len(player_rank_map) > 0:
+                total_now = len(player_rank_map)
+                cur_pct = 100.0 * (total_now - cr + 1) / total_now
+                cur_pct_s = f"{cur_pct:.1f}%"
+                cur_rank_s = f"#{cr}/{total_now}"
+                cur_elo_s = f"{ce:.2f}"
+            else:
+                cur_pct_s = 'N/A'
+                cur_rank_s = 'N/A'
+                cur_elo_s = 'N/A'
+
+            # prepare a markdown link for the DataTable (always add row)
+            player_md = f"[{p}](/player/{urllib.parse.quote(p)})"
+            table_rows.append({
+                'player': player_md,
+                'player_name': p,
+                'ending_elo': ending_elo_s,
+                'ending_elo_num': e if e is not None else None,
+                'ending_rank': ending_rank_s,
+                'ending_rank_num': er if er is not None else None,
+                'ending_pct': ending_pct_s,
+                'ending_pct_num': ending_pct if (e is not None and er is not None and total_players_at_last > 0) else None,
+                'current_elo': cur_elo_s,
+                'current_elo_num': ce if ce is not None else None,
+                'current_rank': cur_rank_s,
+                'current_rank_num': cr if cr is not None else None,
+                'current_pct': cur_pct_s,
+                'current_pct_num': (cur_pct if (ce is not None and cr is not None and len(player_rank_map) > 0) else None),
+            })
+
+        # Use a Dash DataTable for compact display and interactive sorting
+        player_table = dash_table.DataTable(
+            id='team-players-table',
+            columns=[
+                {'name': 'Player', 'id': 'player', 'presentation': 'markdown'},
+                {'name': 'Ending ELO', 'id': 'ending_elo', 'type': 'text'},
+                {'name': 'Ending Rank', 'id': 'ending_rank', 'type': 'text'},
+                {'name': 'Ending Percentile', 'id': 'ending_pct', 'type': 'text'},
+                {'name': 'Current ELO', 'id': 'current_elo', 'type': 'text'},
+                {'name': 'Current Rank', 'id': 'current_rank', 'type': 'text'},
+                {'name': 'Current Percentile', 'id': 'current_pct', 'type': 'text'},
+            ],
+            data=table_rows,
+            sort_action='custom',
+            # default sort: Ending ELO (use visible column id; server callback maps to numeric helper)
+            sort_by=[{'column_id': 'ending_elo', 'direction': 'desc'}],
+            style_cell={
+                'textAlign': 'left',
+                'padding': '4px',
+                'fontSize': '12px',
+                'whiteSpace': 'nowrap',
+                'overflow': 'hidden',
+                'textOverflow': 'ellipsis'
+            },
+            style_header={'fontWeight': 'bold', 'fontSize': '12px'},
+            style_table={'overflowX': 'auto'},
+            style_cell_conditional=[
+                {'if': {'column_id': 'player'}, 'textAlign': 'left', 'width': '22%'},
+                {'if': {'column_id': 'ending_elo'}, 'textAlign': 'center', 'width': '12%'},
+                {'if': {'column_id': 'ending_rank'}, 'textAlign': 'center', 'width': '12%'},
+                {'if': {'column_id': 'ending_pct'}, 'textAlign': 'center', 'width': '12%'},
+                {'if': {'column_id': 'current_elo'}, 'textAlign': 'center', 'width': '12%'},
+                {'if': {'column_id': 'current_rank'}, 'textAlign': 'center', 'width': '12%'},
+                {'if': {'column_id': 'current_pct'}, 'textAlign': 'center', 'width': '12%'},
+            ],
+            page_size=max(1, len(table_rows)),
+            hidden_columns=['player_name','ending_elo_num','ending_rank_num','ending_pct_num','current_elo_num','current_rank_num','current_pct_num'],
+        )
+        player_lines.append(player_table)
     else:
         player_lines.append(html.P('No players'))
 
-    # Beginning and Ending ELO with ranks inline
-    beg_text = f"Beginning ELO: {beg:.2f}" if beg is not None else "Beginning ELO: N/A"
-    if ranks.get('beginning_rank'):
-        beg_text += f"  Rank: #{ranks['beginning_rank']}"
+    # Beginning and Ending ELO with ranks inline (show rank and percentile)
+    try:
+        total_teams_beginning = int(df_teams['beginning_elo'].count())
+    except Exception:
+        total_teams_beginning = len(df_teams) if df_teams is not None else 0
 
-    end_text = f"Ending ELO: {last:.2f}" if last is not None else "Ending ELO: N/A"
-    if ranks.get('last_rank'):
-        end_text += f"  Rank: #{ranks['last_rank']}"
+    if beg is not None:
+        beg_text = f"Beginning ELO: {beg:.2f}"
+        b_rank = ranks.get('beginning_rank')
+        if b_rank and total_teams_beginning > 0:
+            b_pct = 100.0 * (total_teams_beginning - b_rank + 1) / total_teams_beginning
+            beg_text += f"  Rank: #{b_rank}/{total_teams_beginning} ({b_pct:.1f}%)"
+    else:
+        beg_text = "Beginning ELO: N/A"
+
+    try:
+        total_teams_last = int(df_teams['last_game_elo'].count())
+    except Exception:
+        total_teams_last = len(df_teams) if df_teams is not None else 0
+
+    if last is not None:
+        end_text = f"Ending ELO: {last:.2f}"
+        l_rank = ranks.get('last_rank')
+        if l_rank and total_teams_last > 0:
+            end_pct = 100.0 * (total_teams_last - l_rank + 1) / total_teams_last
+            end_text += f"  Rank: #{l_rank}/{total_teams_last} ({end_pct:.1f}%)"
+        elif l_rank:
+            end_text += f"  Rank: #{l_rank}"
+    else:
+        end_text = "Ending ELO: N/A"
 
     # Compute top 5 biggest team ELO changes from games_with_scores (derive before/after for each game)
     top_changes = []
@@ -1449,20 +1680,29 @@ def render_team_page(team):
     except Exception:
         top_changes = []
 
-    # Record and games (as before)
-    record_text = f"Record (W-L-D): {rec.get('wins',0)}-{rec.get('losses',0)}-{rec.get('draws',0)} (Games: {rec.get('games',0)})"
+    # Record: show win percentage and W:L:T breakdown
+    wins = rec.get('wins', 0)
+    losses = rec.get('losses', 0)
+    draws = rec.get('draws', 0)
+    games = rec.get('games', wins + losses + draws)
+    try:
+        win_pct = (100.0 * wins / games) if games > 0 else None
+    except Exception:
+        win_pct = None
+    if win_pct is not None:
+        record_text = f"Record {win_pct:.1f}% W:{wins} L:{losses} T:{draws}"
+    else:
+        record_text = f"Record W:{wins} L:{losses} T:{draws}"
 
-    # Assemble left panel
-    left_panel = [
-        # Link explicitly to the teams route so the Teams tab is shown (instead of the default Players tab)
-    html.Div([html.A('Back to Teams', href='/teams', target='_self')], style={'marginBottom': '10px'}),
-        html.Div(header_lines + [html.H4('Players')] + player_lines + [html.H4('Team Metrics')], style={'width': '35%', 'display': 'inline-block', 'verticalAlign': 'top'})
-    ]
+    # Top section: header and player table take full width
+    top_section = html.Div([
+        html.Div([html.A('Back to Teams', href='/teams', target='_self')], style={'marginBottom': '10px'}),
+        html.Div(header_lines + [html.H4('Players')] + player_lines, style={'width': '100%'}),
+    ], style={'width': '100%','marginBottom':'12px'})
 
-    # Add metrics and top changes in left column below players
+    # Add metrics and top changes in a left column below the top section
     metrics_block = [
         html.P(beg_text),
-        html.P(end_text),
         html.P(record_text),
         html.H4('Top 5 Biggest ELO Changes')
     ]
@@ -1477,14 +1717,16 @@ def render_team_page(team):
     else:
         metrics_block.append(html.P('No game change data'))
 
-    left_panel.append(html.Div(metrics_block))
-
-    # Right panel: the interactive Plotly figure
-    right_panel = []
+    # Build bottom row: metrics column (left) and figure column (right)
+    metrics_div = html.Div(metrics_block, style={'width': '35%', 'display': 'inline-block', 'verticalAlign': 'top'})
     if fig is not None:
-        right_panel.append(html.Div([dcc.Graph(figure=fig, id='team-graph')], style={'width': '63%', 'display': 'inline-block', 'paddingLeft': '20px'}))
+        graph_div = html.Div([dcc.Graph(figure=fig, id='team-graph')], style={'width': '63%', 'display': 'inline-block', 'paddingLeft': '20px', 'verticalAlign': 'top'})
+    else:
+        graph_div = html.Div()
 
-    return html.Div(left_panel + right_panel)
+    bottom_row = html.Div([metrics_div, graph_div], style={'width': '100%'})
+
+    return html.Div([top_section, bottom_row])
 
 
 def render_changes_tab():
@@ -1570,6 +1812,141 @@ def render_changes_tab():
         players_table,
     ])
     return layout
+
+
+@app.callback(
+    Output('team-players-table', 'data'),
+    [Input('team-players-table', 'sort_by'), Input('url', 'pathname')]
+)
+def team_players_table_data(sort_by, pathname):
+    """Server-side populate & sort the team players table based on current URL (team page).
+    This callback rebuilds the rows for the specified team and applies sorting using
+    hidden numeric columns when available.
+    """
+    # determine team from pathname
+    try:
+        if not pathname or not pathname.startswith('/team/'):
+            return []
+        team = urllib.parse.unquote(pathname[len('/team/'):])
+    except Exception:
+        return []
+
+    # validate team
+    if team not in team_to_players:
+        return []
+
+    # Recreate the same members_info as in render_team_page
+    members = team_to_players.get(team, [])
+    if elo_df is None or elo_df.empty:
+        return []
+    idx = elo_df.index
+    # find team's last game position
+    team_last_game = None
+    try:
+        if team_first_last and team in team_first_last:
+            team_last_game = team_first_last[team][1]
+    except Exception:
+        team_last_game = None
+    if team_last_game is not None:
+        try:
+            team_last_pos = idx.searchsorted(team_last_game, side='right') - 1
+            if team_last_pos < 0:
+                team_last_pos = 0
+        except Exception:
+            team_last_pos = len(idx) - 1
+    else:
+        team_last_pos = len(idx) - 1
+
+    # row at last snapshot
+    row_at_last = None
+    try:
+        row_at_last = elo_df.iloc[team_last_pos]
+    except Exception:
+        row_at_last = None
+
+    # compute global player ranks at last snapshot
+    player_rank_at_last = {}
+    total_players_at_last = 0
+    if row_at_last is not None:
+        vals = {p: row_at_last.get(p) for p in elo_df.columns}
+        valid = {p: float(v) for p, v in vals.items() if v is not None and not pd.isna(v)}
+        total_players_at_last = len(valid)
+        sorted_all = sorted(valid.items(), key=lambda x: x[1], reverse=True)
+        for i, (p, _) in enumerate(sorted_all, start=1):
+            player_rank_at_last[p] = i
+
+    # current ranks
+    player_current_elos = {}
+    try:
+        last_row = elo_df.iloc[-1]
+        for col in elo_df.columns:
+            try:
+                player_current_elos[col] = float(last_row[col])
+            except Exception:
+                pass
+    except Exception:
+        player_current_elos = {}
+    sorted_players = sorted(player_current_elos.items(), key=lambda x: x[1], reverse=True) if player_current_elos else []
+    player_rank_map = {p: i+1 for i, (p, _) in enumerate(sorted_players)}
+
+    rows = []
+    for p in members:
+        try:
+            ending_elo = float(row_at_last.get(p)) if (row_at_last is not None and p in row_at_last.index and not pd.isna(row_at_last.get(p))) else None
+        except Exception:
+            ending_elo = None
+        ending_rank = player_rank_at_last.get(p)
+        ending_pct = (100.0 * (total_players_at_last - ending_rank + 1) / total_players_at_last) if (ending_rank is not None and total_players_at_last>0) else None
+        current_elo = player_current_elos.get(p)
+        current_rank = player_rank_map.get(p)
+        current_pct = (100.0 * (len(player_rank_map) - current_rank + 1) / len(player_rank_map)) if (current_rank is not None and len(player_rank_map)>0) else None
+
+        player_md = f"[{p}](/player/{urllib.parse.quote(p)})"
+        rows.append({
+            'player': player_md,
+            'player_name': p,
+            'ending_elo': f"{ending_elo:.2f}" if ending_elo is not None else 'N/A',
+            'ending_elo_num': ending_elo,
+            'ending_rank': f"#{ending_rank}/{total_players_at_last}" if ending_rank is not None else 'N/A',
+            'ending_rank_num': ending_rank,
+            'ending_pct': f"{ending_pct:.1f}%" if ending_pct is not None else 'N/A',
+            'ending_pct_num': ending_pct,
+            'current_elo': f"{current_elo:.2f}" if current_elo is not None else 'N/A',
+            'current_elo_num': current_elo,
+            'current_rank': f"#{current_rank}/{len(player_rank_map)}" if current_rank is not None else 'N/A',
+            'current_rank_num': current_rank,
+            'current_pct': f"{current_pct:.1f}%" if current_pct is not None else 'N/A',
+            'current_pct_num': current_pct,
+        })
+
+    # apply server-side sorting if requested
+    if sort_by:
+        for s in reversed(sort_by):
+            col = s.get('column_id')
+            direction = s.get('direction', 'asc')
+            reverse = True if direction == 'desc' else False
+            # map visible columns to numeric helpers when available
+            mapping = {
+                'ending_elo': 'ending_elo_num',
+                'ending_rank': 'ending_rank_num',
+                'ending_pct': 'ending_pct_num',
+                'current_elo': 'current_elo_num',
+                'current_rank': 'current_rank_num',
+                'current_pct': 'current_pct_num',
+                'player': 'player_name'
+            }
+            key = mapping.get(col, col)
+
+            def keyfn(r):
+                v = r.get(key)
+                return (v is None, v)
+
+            try:
+                rows.sort(key=lambda r: keyfn(r), reverse=reverse)
+            except Exception:
+                pass
+
+    return rows
 
 
 @app.callback(
@@ -1759,9 +2136,10 @@ def update_changes_tables(date_iso, players_sort_by, teams_sort_by):
         rec = team_record_upto.get(team.strip()) or team_record.get(team) or team_record.get(team.strip()) or {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0}
         games_played = rec.get('games', 0)
         wins = rec.get('wins', 0)
+        losses = rec.get('losses', 0)
         draws = rec.get('draws', 0)
         win_pct = (wins + 0.5 * draws) / games_played if games_played > 0 else None
-        teams_rows.append({'team': team, 'before': None if before is None else round(before, 2), 'after': None if after is None else round(after, 2), 'delta': delta, 'win_pct': None if win_pct is None else round(win_pct, 3)})
+        teams_rows.append({'team': team, 'before': None if before is None else round(before, 2), 'after': None if after is None else round(after, 2), 'delta': delta, 'win_pct': None if win_pct is None else round(win_pct, 3), 'wins': wins, 'losses': losses, 'draws': draws})
 
     # Players: only include players whose elo has changed (delta not None and not zero)
     players_rows = [r for r in players_rows if r.get('delta') is not None and r.get('delta') != 0]
@@ -1810,7 +2188,8 @@ def update_changes_tables(date_iso, players_sort_by, teams_sort_by):
                 pwins = prec.get('wins', 0)
                 pdraws = prec.get('draws', 0)
                 p_win_pct = (pwins + 0.5 * pdraws) / pgames if pgames > 0 else None
-                p_win_display = (f"{p_win_pct*100:.1f}%" if p_win_pct is not None else '')
+                plosses = prec.get('losses', 0)
+                p_win_display = (f"{p_win_pct*100:.1f}% (W:{pwins} L:{plosses} T:{pdraws})" if p_win_pct is not None else '')
                 new_players.append({
                     'player': pname,
                     'before': before_val,
@@ -1869,7 +2248,10 @@ def update_changes_tables(date_iso, players_sort_by, teams_sort_by):
                     'rank_change': rc,
                     'rank_change_display': rc_display,
                     'win_pct': None if pd.isna(r.get('win_pct')) else round(float(r.get('win_pct')), 3),
-                    'win_pct_display': (f"{float(r.get('win_pct'))*100:.1f}%" if (not pd.isna(r.get('win_pct')) and r.get('win_pct') is not None) else '')
+                    'wins': int(r.get('wins')) if r.get('wins') is not None else 0,
+                    'losses': int(r.get('losses')) if r.get('losses') is not None else 0,
+                    'draws': int(r.get('draws')) if r.get('draws') is not None else 0,
+                    'win_pct_display': (f"{float(r.get('win_pct'))*100:.1f}% (W:{int(r.get('wins') if r.get('wins') is not None else 0)} L:{int(r.get('losses') if r.get('losses') is not None else 0)} T:{int(r.get('draws') if r.get('draws') is not None else 0)})" if (not pd.isna(r.get('win_pct')) and r.get('win_pct') is not None) else '')
                 })
             teams_rows = new_teams
     except Exception:
