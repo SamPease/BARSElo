@@ -80,7 +80,7 @@ def collect_names(rows: List[List[str]]) -> Dict[str, int]:
     return dict(counts)
 
 
-def build_candidates(names: List[str], counts: Dict[str, int]) -> List[Tuple[str, str, float]]:
+def build_candidates(names: List[str], counts: Dict[str, int], min_score: float = 0.72) -> List[Tuple[str, str, float]]:
     """Return list of candidate pairs (name1, name2, score) sorted desc by score."""
     normalized = {n: normalize(n) for n in names}
     last = {n: last_name(n) for n in names}
@@ -116,7 +116,7 @@ def build_candidates(names: List[str], counts: Dict[str, int]) -> List[Tuple[str
                     # substring containment (one is contained in the other)
                     elif na in nb or nb in na:
                         score = max(score, 0.8)
-            if score > 0.72:
+            if score > min_score:
                 candidates.append((a, b, score))
 
     # sort by score desc then by combined counts desc
@@ -176,6 +176,41 @@ def append_aliases_csv(path: str, pairs: List[Tuple[str, str]]) -> None:
             exist.add(entry)
 
 
+def write_aliases_csv_full(path: str, all_names: List[str], components: List[Tuple[List[str], str]]) -> None:
+    """Overwrite aliases CSV with rows: <aliases_joined> , <canonical>
+
+    - aliases_joined is a pipe-separated list of all variant names for the group.
+    - canonical is the chosen canonical spelling for the group.
+
+    We include singleton names as groups of size 1 (aliases==[name], canonical==name)
+    so every name appears in the output as the user requested.
+    """
+    # backup existing file if exists
+    if os.path.exists(path):
+        bak = f"{path}.bak.{int(time.time())}"
+        shutil.copy2(path, bak)
+        print(f"aliases CSV backup created at {bak}")
+
+    # Build a map from canonical -> sorted alias list for stable output
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        # write a header for clarity (optional)
+        writer.writerow(["aliases_pipe_separated", "canonical"])
+        # write the provided components first
+        for aliases, canonical in components:
+            # ensure stable ordering
+            uniq = sorted(dict.fromkeys(aliases))
+            writer.writerow(["|".join(uniq), canonical])
+        # include any leftover singletons not present in components
+        present = set()
+        for aliases, canonical in components:
+            for a in aliases:
+                present.add(a)
+        for n in sorted(all_names):
+            if n not in present:
+                writer.writerow([n, n])
+
+
 def write_teams_csv(path: str, header: List[str], rows: List[List[str]]) -> None:
     # backup first
     bak = f"{path}.bak.{int(time.time())}"
@@ -205,75 +240,87 @@ def main() -> None:
     names = sorted(name_counts.keys())
     print(f"Found {len(names)} unique player names (non-empty).")
 
-    candidates = build_candidates(names, name_counts)
+    candidates = build_candidates(names, name_counts, args.min_score)
     if not candidates:
         print("No candidate duplicates found with current heuristics.")
+        # still produce an aliases CSV that maps each name to itself
+        if not args.dry_run:
+            write_aliases_csv_full(args.aliases, names, [])
+            print(f"Wrote aliases CSV at {args.aliases} (no groups found)")
         return
 
-    print(f"Found {len(candidates)} candidate pairs. Will ask for confirmation interactively.")
-
-    replacements: Dict[str, str] = {}
-    alias_pairs: List[Tuple[str, str]] = []
-    seen: Set[Tuple[str, str]] = set()
-
+    # Build adjacency graph from candidate pairs (transitive edges)
+    adj: Dict[str, Set[str]] = defaultdict(set)
     for a, b, score in candidates:
-        if (a, b) in seen or (b, a) in seen:
-            continue
-        # skip if either already set to be replaced the other way
-        if a in replacements and replacements[a] == b:
-            continue
-        if b in replacements and replacements[b] == a:
-            continue
+        adj[a].add(b)
+        adj[b].add(a)
 
-        print("\nCandidate pair (score={:.3f}):".format(score))
-        print(f"  1) {a}   ({name_counts.get(a,0)} occurrences)")
-        print(f"  2) {b}   ({name_counts.get(b,0)} occurrences)")
-
-        same = confirm("Are these the same person?")
-        if not same:
-            seen.add((a, b))
+    # find connected components
+    seen_nodes: Set[str] = set()
+    components: List[List[str]] = []
+    for n in names:
+        if n in seen_nodes:
             continue
+        # BFS/DFS to collect component
+        stack = [n]
+        comp = []
+        while stack:
+            cur = stack.pop()
+            if cur in seen_nodes:
+                continue
+            seen_nodes.add(cur)
+            comp.append(cur)
+            for nb in adj.get(cur, []):
+                if nb not in seen_nodes:
+                    stack.append(nb)
+        components.append(comp)
 
-        # ask which to keep
-        while True:
-            choice = input("Which should be the canonical spelling? (1/2/new/skip): ").strip().lower()
-            if choice == "1":
-                keep = a
-                remove = b
-                break
-            if choice == "2":
-                keep = b
-                remove = a
-                break
-            if choice == "new":
-                newname = input("Enter canonical spelling to use: ").strip()
-                if newname:
-                    keep = newname
-                    remove = a
-                    # we will map both a and b to newname
-                    break
-            if choice == "skip":
-                keep = None
-                break
-            print("Please enter 1, 2, new, or skip.")
-
-        if keep is None:
-            seen.add((a, b))
+    # prepare final components with canonical selection and interactive confirmation
+    final_components: List[Tuple[List[str], str]] = []
+    replacements: Dict[str, str] = {}
+    for comp in components:
+        if len(comp) == 1:
+            # singleton; no aliasing needed but still include in output
+            final_components.append((comp, comp[0]))
             continue
 
-        # record replacements: map the non-kept raw strings to keep
-        # if user entered 'new' canonical, map both a and b to it
-        if choice == "new":
-            replacements[a] = keep
-            replacements[b] = keep
-            alias_pairs.append((a, keep))
-            alias_pairs.append((b, keep))
+        # sort comp for stable presentation
+        comp_sorted = sorted(comp, key=lambda x: (-name_counts.get(x, 0), x))
+        # default canonical = most frequent name
+        default_canon = comp_sorted[0]
+
+        print("\nAlias group candidates:")
+        for i, nm in enumerate(comp_sorted, start=1):
+            print(f"  {i}) {nm}   ({name_counts.get(nm,0)} occurrences)")
+        print(f"Default canonical candidate: '{default_canon}'")
+
+        pick = input("Press Enter to accept default, choose a number, enter 'new' to type a canonical name, or 'skip' to leave unchanged: ").strip()
+        if pick == "":
+            canonical = default_canon
+        elif pick.lower() == "skip":
+            # leave them as-is (each maps to itself)
+            for nm in comp_sorted:
+                final_components.append(([nm], nm))
+            continue
+        elif pick.lower() == "new":
+            newname = input("Enter canonical spelling to use: ").strip()
+            canonical = newname if newname else default_canon
         else:
-            replacements[remove] = keep
-            alias_pairs.append((remove, keep))
+            try:
+                idx = int(pick)
+                if 1 <= idx <= len(comp_sorted):
+                    canonical = comp_sorted[idx - 1]
+                else:
+                    print("Invalid selection; using default.")
+                    canonical = default_canon
+            except Exception:
+                print("Invalid input; using default.")
+                canonical = default_canon
 
-        # mark seen so we don't re-ask for these two
-        seen.add((a, b))
+        # record component mapping
+        final_components.append((comp_sorted, canonical))
+        for nm in comp_sorted:
+            replacements[nm] = canonical
 
     if not replacements:
         print("No replacements confirmed.")
@@ -290,8 +337,18 @@ def main() -> None:
     # apply replacements to rows
     new_rows = apply_replacements(rows, replacements)
     write_teams_csv(args.teams, header, new_rows)
-    append_aliases_csv(args.aliases, alias_pairs)
-    print(f"Applied replacements and appended {len(alias_pairs)} alias rows to {args.aliases}.")
+    # prepare alias pairs to append: only write pairs where alias != canonical
+    alias_pairs: List[Tuple[str, str]] = []
+    for aliases, canonical in final_components:
+        for a in aliases:
+            if a != canonical:
+                alias_pairs.append((a, canonical))
+
+    if alias_pairs:
+        append_aliases_csv(args.aliases, alias_pairs)
+        print(f"Applied replacements and appended {len(alias_pairs)} alias rows to {args.aliases}.")
+    else:
+        print("Applied replacements; no non-identity alias rows to append to aliases CSV.")
 
 
 if __name__ == "__main__":

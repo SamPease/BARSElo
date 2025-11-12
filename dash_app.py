@@ -615,18 +615,50 @@ def _apply_sort(rows, sort_by_list):
     for s in reversed(sort_by_list):
         col = s.get('column_id')
         direction = s.get('direction', 'asc')
-        reverse = True if direction == 'desc' else False
 
+        # Special-case win_pct_display: ensure numeric comparison and keep missing values at the end
+        if col == 'win_pct_display':
+            def keyfn_wp(r):
+                wp = r.get('win_pct')
+                # treat NaN/None/empty as missing
+                if wp is None or (isinstance(wp, float) and pd.isna(wp)):
+                    return (1, 0.0)
+                try:
+                    v = float(wp)
+                except Exception:
+                    return (1, 0.0)
+                # when descending, invert numeric so we can sort ascending while respecting direction
+                if direction == 'desc':
+                    return (0, -v)
+                return (0, v)
+
+            try:
+                rows.sort(key=keyfn_wp)
+            except Exception:
+                pass
+            continue
+
+        # Generic keyfn: return raw value; we'll sort ascending on a stable comparable tuple
         def keyfn(r):
-            if col == 'win_pct_display':
-                v = r.get('win_pct')
-                if v is None:
-                    return r.get('win_pct_display')
-                return v
             return r.get(col)
 
+        def key_wrapper(r):
+            val = keyfn(r)
+            missing = val is None or (isinstance(val, float) and pd.isna(val)) or (isinstance(val, str) and val == '')
+            # For numeric values keep as float, else use lowercase string for deterministic ordering
+            if missing:
+                return (1, '')
+            if isinstance(val, (int, float, np.number)):
+                try:
+                    num = float(val)
+                    return (0, num if direction == 'asc' else -num)
+                except Exception:
+                    pass
+            # fallback string
+            return (0, str(val).lower() if direction == 'asc' else ''.join(chr(255 - ord(c)) for c in str(val)))
+
         try:
-            rows.sort(key=lambda r: (keyfn(r) is None, keyfn(r)), reverse=reverse)
+            rows.sort(key=key_wrapper)
         except Exception:
             pass
     return rows
@@ -940,11 +972,23 @@ def render_player_page(player):
             win_pct = (wins + 0.5 * draws) / games_played if games_played > 0 else None
         team_infos.append({'team': t, 'last_dt': last_dt, 'last_str': last_str, 'elo': elo_val, 'win_pct': win_pct, 'wins': wins, 'losses': losses, 'draws': draws})
 
-    # sort by last_dt (most recent first); None values go to the end
+    # Normalize last_dt to datetime objects and sort by last_dt (most recent first); None values go to the end
+    for ti in team_infos:
+        ld = ti.get('last_dt')
+        if ld is None:
+            continue
+        # if it's already a datetime-like, leave it; otherwise try to parse
+        if not isinstance(ld, datetime):
+            try:
+                ti['last_dt'] = pd.to_datetime(ld)
+            except Exception:
+                ti['last_dt'] = None
+
     def _sort_key(x):
-        if x['last_dt'] is None:
+        # put teams with no last_dt at the end
+        if x.get('last_dt') is None:
             return datetime.min
-        return x['last_dt']
+        return x.get('last_dt')
 
     team_infos.sort(key=_sort_key, reverse=True)
 
@@ -1686,7 +1730,8 @@ def render_team_page(team):
     draws = rec.get('draws', 0)
     games = rec.get('games', wins + losses + draws)
     try:
-        win_pct = (100.0 * wins / games) if games > 0 else None
+        # Use wins + 0.5 * draws as requested: ties count half a win
+        win_pct = (100.0 * (wins + 0.5 * draws) / games) if games > 0 else None
     except Exception:
         win_pct = None
     if win_pct is not None:

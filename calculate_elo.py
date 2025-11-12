@@ -284,49 +284,7 @@ def main():
         else:
             filled_beginning_team_elos[team] = float(INITIAL_ELO)
 
-    # Print top 10 teams by current ELO
-    print("\nTop 10 Teams by Current ELO:")
-    for team, elo in sorted(current_team_elos.items(), key=lambda x: x[1], reverse=True)[:10]:
-        print(f"{team}: {elo:.2f}")
-    
-    # Print bottom 10 teams by current ELO
-    print("\nBottom 10 Teams by Current ELO:")
-    for team, elo in sorted(current_team_elos.items(), key=lambda x: x[1])[:10]:
-        print(f"{team}: {elo:.2f}")
-
-    # Print top 10 teams by beginning ELO
-    print("\nTop 10 Teams by Beginning ELO (ELO immediately before first game):")
-    for team, elo in sorted(filled_beginning_team_elos.items(), key=lambda x: x[1], reverse=True)[:10]:
-        print(f"{team}: {elo:.2f}")
-
-    # Print bottom 10 teams by beginning ELO
-    print("\nBottom 10 Teams by Beginning ELO (ELO immediately before first game):")
-    for team, elo in sorted(filled_beginning_team_elos.items(), key=lambda x: x[1])[:10]:
-        print(f"{team}: {elo:.2f}")
-
-    # Print top 10 teams by last game ELO
-    print("\nTop 10 Teams by Last Game ELO:")
-    for team, elo in sorted(last_game_team_elos.items(), key=lambda x: x[1], reverse=True)[:10]:
-        last_game_time = team_elo_history[team][-1][0]  # Get the time of their last game
-        print(f"{team}: {elo:.2f} (last played {last_game_time})")
-    
-    # Print bottom 10 teams by last game ELO
-    print("\nBottom 10 Teams by Last Game ELO:")
-    for team, elo in sorted(last_game_team_elos.items(), key=lambda x: x[1])[:10]:
-        last_game_time = team_elo_history[team][-1][0]  # Get the time of their last game
-        print(f"{team}: {elo:.2f} (last played {last_game_time})")
-
-    # Print record high/low individual ELOs
-    print("\nRecord High Individual ELOs:")
-    for p, (elo, t) in sorted(player_high.items(), key=lambda x: -x[1][0])[:10]:
-        print(f"{p}: {elo:.2f} at {t}")
-    print("\nRecord Low Individual ELOs:")
-    for p, (elo, t) in sorted(player_low.items(), key=lambda x: x[1][0])[:10]:
-        print(f"{p}: {elo:.2f} at {t}")
-    # Print top 10 biggest ELO changes across all teams/games
-    print("\nTop 10 Biggest ELO Changes (by game):")
-    for entry in sorted(all_game_elo_changes, key=lambda x: -x['abs_change'])[:10]:
-        print(f"{entry['time']}: {entry['score']} | {entry['t1']} Δ{entry['t1_change']:+.2f} ({entry['t1_elo_before']:.2f}->{entry['t1_elo_after']:.2f}) | {entry['t2']} Δ{entry['t2_change']:+.2f} ({entry['t2_elo_before']:.2f}->{entry['t2_elo_after']:.2f})")
+    # (Summary prints removed.)
 
     # Write full ELO history
     with open(output_file, 'w', newline='', encoding='utf-8') as f:
@@ -352,67 +310,7 @@ def main():
         for _, tstr in items:
             writer.writerow(elo_history_map[tstr])
 
-    # Print top 10 and bottom 10 players by ELO
-    sorted_players = sorted(elos.items(), key=lambda x: x[1], reverse=True)
-    print("\nTop 10 Players by ELO:")
-    for player, elo in sorted_players[:10]:
-        print(f"{player}: {round(elo,2)}")
-    print("\nBottom 10 Players by ELO:")
-    for player, elo in sorted_players[-1:-11:-1]:
-        print(f"{player}: {round(elo,2)}")
-
-
-    # Print all teams with current ELOs, sorted by last game time (most recent first).
-    # Teams that have not played are listed after teams that have played, in the
-    # same order they appear in the Teams CSV.
-    print("\nAll Team ELOs (Current), sorted by last game time (least recent first, then most recent). Teams with no games are listed last in CSV order:")
-    # Build original order index map (to preserve CSV order for teams with no games)
-    original_order = {team: idx for idx, team in enumerate(team_to_players.keys())}
-
-    team_rows = []
-    for team in team_to_players.keys():
-        players = team_to_players[team]
-        # compute current ELO if possible
-        valid_players = [p for p in players if p in elos]
-        if valid_players:
-            current_elo = sum(elos[p] for p in valid_players) / len(valid_players)
-        else:
-            current_elo = None
-
-        # determine last game time if any
-        last_dt = None
-        if team_elo_history.get(team):
-            # team_elo_history entries are (time_str, elo)
-            last_time_str = team_elo_history[team][-1][0]
-            try:
-                last_dt = datetime.strptime(last_time_str, '%m/%d/%Y %H:%M:%S')
-            except Exception:
-                last_dt = None
-
-        team_rows.append((team, current_elo, last_dt, original_order.get(team, 10**9)))
-
-    # Sorting key:
-    # - Teams with a last_dt should come before teams without one
-    # - Among teams with last_dt, sort by last_dt ascending (least recent first)
-    # - For teams without last_dt, sort by their original CSV order
-    def sort_key(item):
-        team, current_elo, last_dt, orig_idx = item
-        if last_dt is not None:
-            # Use timestamp so that older (smaller dt) sorts first
-            return (0, last_dt.timestamp(), orig_idx)
-        else:
-            return (1, orig_idx)
-
-    for team, current_elo, last_dt, _ in sorted(team_rows, key=sort_key):
-        if not team_to_players[team]:
-            print(f"{team}: No players")
-            continue
-        if current_elo is None:
-            current_str = "N/A"
-        else:
-            current_str = f"{current_elo:.2f}"
-
-        print(f"{team}: {current_str}")
+    # (Player/team summary prints removed.)
 
 
 if __name__ == '__main__':

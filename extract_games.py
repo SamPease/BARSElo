@@ -14,6 +14,7 @@ from dateutil import parser as dateparser
 
 GAMES_DIR = os.path.join(os.path.dirname(__file__), "data", "games")
 CSV_PATH = os.path.join(os.path.dirname(__file__), "Sports Elo - Games.csv")
+TEAMS_CSV_PATH = os.path.join(os.path.dirname(__file__), "Sports Elo - Teams.csv")
 
 
 def find_html_files(directory):
@@ -229,6 +230,45 @@ def main():
         print("No additions after dedupe check.")
         return
 
+    # Load known team names from Teams CSV header for validation
+    def load_known_teams(path):
+        if not os.path.exists(path):
+            return set()
+        try:
+            with open(path, newline='', encoding='utf-8', errors='replace') as f:
+                reader = csv.reader(f)
+                first = next(reader, [])
+                # clean and include non-empty header cells
+                return set(clean_team_name(h).strip() for h in first if (h or '').strip())
+        except Exception:
+            return set()
+
+    known_teams = load_known_teams(TEAMS_CSV_PATH)
+    if not known_teams:
+        print(f"Warning: no teams found in {TEAMS_CSV_PATH}; skipping team-existence validation.")
+
+    # Validate additions against known teams; collect skipped games for reporting
+    valid_additions = []
+    skipped_missing = []
+    for g in additions:
+        t1 = g['team1'].strip()
+        t2 = g['team2'].strip()
+        missing = []
+        if known_teams and t1 not in known_teams:
+            missing.append(t1)
+        if known_teams and t2 not in known_teams:
+            missing.append(t2)
+        if missing:
+            # record skipped game with which teams missing
+            skipped_missing.append((g, missing))
+            print(f"Skipping game because unknown team(s): {t1} vs {t2} at {g['time']} -> missing: {', '.join(missing)}")
+            continue
+        valid_additions.append(g)
+
+    if not valid_additions:
+        print(f"No additions after team-existence validation. {len(skipped_missing)} games skipped due to unknown teams.")
+        return
+
     # Determine header to write: prefer existing header casing if present
     if existing_header:
         header = existing_header
@@ -241,7 +281,7 @@ def main():
         combined_rows.append(r.copy())
 
     # append additions in the CSV column format
-    for g in additions:
+    for g in valid_additions:
         if inferred_time_format:
             time_str = g['time'].strftime(inferred_time_format)
         else:
