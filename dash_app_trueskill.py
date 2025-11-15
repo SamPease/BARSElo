@@ -903,20 +903,21 @@ def render_player_page(player):
         if rank is not None and total_players>0:
             percentile = 100 * (total_players - rank + 1) / total_players
 
-    # compute player record
-    pstat = {'wins':0,'losses':0,'draws':0,'games':0}
-    player_teams = [t for t,members in team_to_players.items() if player in members]
-    for dt, t1, s1, t2, s2 in games_with_scores:
-        if t1 in player_teams:
-            pstat['games'] += 1
-            if s1 > s2:
-                pstat['wins'] += 1
-            elif s1 < s2:
-                pstat['losses'] += 1
-            else:
-                pstat['draws'] += 1
-        if t2 in player_teams:
-            pstat['games'] += 0  # already counted when team in player_teams above
+    # compute player record using the shared helper so team/player counts match
+    try:
+        df_players, _ = compute_player_stats(team_to_players, players, dates, elo_df, games, games_with_scores)
+        # df_players stores plain player names (not markdown links)
+        row = df_players.loc[df_players['player'] == player]
+        if not row.empty:
+            r = row.iloc[0]
+            pstat = {'wins': int(r.get('wins', 0)), 'losses': int(r.get('losses', 0)), 'draws': int(r.get('draws', 0)), 'games': int(r.get('games', 0))}
+        else:
+            pstat = {'wins':0,'losses':0,'draws':0,'games':0}
+    except Exception:
+        # fallback: zeroed record
+        pstat = {'wins':0,'losses':0,'draws':0,'games':0}
+    # teams the player has been on
+    player_teams = [t for t, members in team_to_players.items() if player in members]
 
     # build info block
     info = []

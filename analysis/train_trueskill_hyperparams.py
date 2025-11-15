@@ -67,10 +67,11 @@ def team_weight_list(team_players, score, players_total):
     size = len(team_players)
     if size == 0:
         return []
-    factor = float(score) / 5.0
-    mult = float(players_total) / float(size)
-    weight = factor * mult
-    return [weight for _ in team_players]
+    # Match the simulation used in `calculate_trueskill.py`: weights
+    # are proportional to players_total/team_size and do not include
+    # any explicit score-based factor.
+    mult = max(1.0, float(players_total) / float(size))
+    return [mult for _ in team_players]
 
 
 def predicted_prob_team1_win(team1_ratings, team2_ratings, beta):
@@ -97,9 +98,14 @@ def predicted_prob_team1_win(team1_ratings, team2_ratings, beta):
     return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
 
 
-def evaluate_params(mu, sigma, beta, teams_file, games_file, max_games=None):
-    # Setup trueskill env
-    ts.setup(mu=mu, sigma=sigma, beta=beta)
+def evaluate_params(mu, sigma, beta, teams_file, games_file, max_games=None, tau=None, draw_probability=None):
+    # Setup trueskill env. If tau/draw_probability not provided, use
+    # reasonable defaults (tau = sigma/100, draw_probability = 0.123)
+    if tau is None:
+        tau = float(sigma) / 100.0
+    if draw_probability is None:
+        draw_probability = 0.123
+    ts.setup(mu=mu, sigma=sigma, beta=beta, tau=tau, draw_probability=draw_probability)
 
     team_to_players = load_teams(teams_file)
     games = load_games(games_file)

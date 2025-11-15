@@ -2,10 +2,11 @@ import csv
 from collections import defaultdict, OrderedDict
 from datetime import datetime, timedelta
 import trueskill as ts
+import math
 # Trueskill settings
 INITIAL_MU = 1000.0
 INITIAL_SIGMA = INITIAL_MU / 3.0
-INITIAL_BETA = INITIAL_SIGMA / 2.0
+INITIAL_BETA = INITIAL_SIGMA / 2.0 * math.sqrt(5)
 INITIAL_TAU = (INITIAL_SIGMA / 100.0)
 DRAW_PROBABILITY = 0.123
 
@@ -105,20 +106,10 @@ def main():
         team2 = team_to_players.get(t2, [])
 
 
-        # Determine ranks for trueskill.rate (lower is better)
-        if s1 > s2:
-            ranks = [0, 1]
-        elif s1 < s2:
-            ranks = [1, 0]
-        else:
-            # tie -> same rank to denote draw
-            ranks = [0, 0]
-
         # Build team rating lists (list of lists) in the same shape trueskill expects
+        # If a team has no players, skip rate and only record history (no update)
         team1_ratings = [ratings[p] for p in team1]
         team2_ratings = [ratings[p] for p in team2]
-
-        # If a team has no players, skip rate and only record history (no update)
         if not team1_ratings or not team2_ratings:
             # still record current values at this timestamp
             expose_row = [time] + [round(ts.expose(ratings[p]), 2) for p in all_players]
@@ -143,15 +134,41 @@ def main():
 
         weights = [team_weights_by_players(team1), team_weights_by_players(team2)]
 
-        # Call trueskill.rate with per-player weights derived from player counts.
-        rated_teams = ts.rate([team1_ratings, team2_ratings], ranks=ranks, weights=weights)
+        # Instead of a single rate call, apply Margin-Of-Victory (MOV) by
+        # calling `ts.rate` repeatedly: team1 beats team2 `s1` times, then
+        # team2 beats team1 `s2` times. Each call updates the ratings in-place
+        # so the sequence of calls accumulates effect. After all calls we
+        # record one expose row for this game timestamp.
 
-        # Apply new ratings directly (no MOV/tournament scaling)
-        for team_players, rated_team in ((team1, rated_teams[0]), (team2, rated_teams[1])):
-            for p, new_rating in zip(team_players, rated_team):
-                ratings[p] = new_rating
+        # Ensure s1/s2 are non-negative integers
+        try:
+            calls_a = max(0, int(s1))
+        except Exception:
+            calls_a = 0
+        try:
+            calls_b = max(0, int(s2))
+        except Exception:
+            calls_b = 0
 
-        # After applying updates, save expose values for this timestamp
+        # Perform `calls_a` times where team1 is ranked above team2
+        for _ in range(calls_a):
+            team1_ratings = [ratings[p] for p in team1]
+            team2_ratings = [ratings[p] for p in team2]
+            rated = ts.rate([team1_ratings, team2_ratings], ranks=[0, 1], weights=weights)
+            for team_players, rated_team in ((team1, rated[0]), (team2, rated[1])):
+                for p, new_rating in zip(team_players, rated_team):
+                    ratings[p] = new_rating
+
+        # Then perform `calls_b` times where team2 is ranked above team1
+        for _ in range(calls_b):
+            team1_ratings = [ratings[p] for p in team1]
+            team2_ratings = [ratings[p] for p in team2]
+            rated = ts.rate([team1_ratings, team2_ratings], ranks=[1, 0], weights=weights)
+            for team_players, rated_team in ((team1, rated[0]), (team2, rated[1])):
+                for p, new_rating in zip(team_players, rated_team):
+                    ratings[p] = new_rating
+
+        # After applying all repeated updates, save expose values for this timestamp
         expose_row = [time] + [round(ts.expose(ratings[p]), 2) for p in all_players]
         expose_history_map[time] = expose_row
 
@@ -177,7 +194,7 @@ def main():
             for _, tstr in items:
                 writer.writerow(data_map[tstr])
 
-    _write_map('trueskill_results.csv', all_players, expose_history_map)
+    _write_map('trueskill_mov_results.csv', all_players, expose_history_map)
 
 
 if __name__ == '__main__':
