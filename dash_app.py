@@ -47,7 +47,7 @@ import plotly.express as px
 import csv
 
 # Constants - file names (same as other scripts)
-ELO_RESULTS = 'trueskill_mu_minus_3sigma_results.csv'
+ELO_RESULTS = 'trueskill_results.csv'
 TEAMS_FILE = 'Sports Elo - Teams.csv'
 GAMES_FILE = 'Sports Elo - Games.csv'
 INITIAL_ELO = 1000

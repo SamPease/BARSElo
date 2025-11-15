@@ -5,8 +5,8 @@ import os
 from datetime import datetime, timedelta
 
 INITIAL_ELO = 1000
-K_FACTOR = 250
-TOURNAMENT_MULTIPLIER = 1.5  # Set as needed
+K_FACTOR = 453.25752252359587
+TOURNAMENT_MULTIPLIER = 1.7185852196908644 
 
 
 TEAMS = 'Sports Elo - Teams.csv'
