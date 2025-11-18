@@ -45,6 +45,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 import csv
+import os
 
 # Constants - file names (same as other scripts)
 ELO_RESULTS = 'viz/elo_results.csv'
@@ -481,7 +482,10 @@ def build_team_figure(team, dates, team_elos_series, team_to_players, elo_df, te
 
 
 # Build Dash app layout
-app = dash.Dash(__name__, suppress_callback_exceptions=True)
+# Ensure Dash serves the repo-level `assets/` directory regardless of this script location.
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+ASSETS_FOLDER = os.path.join(REPO_ROOT, 'assets')
+app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder=ASSETS_FOLDER, assets_url_path='/assets')
 server = app.server
 
 # Load data once at startup
