@@ -26,6 +26,7 @@ from data.data_loader import load_teams, load_games, get_all_players, parse_time
 from models.elo import EloModel
 from models.trueskill import TrueSkillModel
 from models.trueskill_mov import TrueSkillMovModel
+from models.bt_mov import BTMOVModel
 
 # Default model name (can be changed)
 DEFAULT_MODEL = 'elo'  # 'elo' | 'trueskill' | 'trueskill_mov'
@@ -62,6 +63,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file):
         'elo': EloModel,
         'trueskill': TrueSkillModel,
         'trueskill_mov': TrueSkillMovModel,
+        'bt_mov': BTMOVModel,
     }
     ModelClass = model_classes.get(model_name)
     if ModelClass is None:
@@ -107,11 +109,11 @@ def run_model(model_name, team_to_players, games, all_players, output_file):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov')
+    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov')
     args = parser.parse_args()
 
     model_name = args.model.lower()
-    if model_name not in ('elo', 'trueskill', 'trueskill_mov'):
+    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov'):
         raise SystemExit('Unknown model: ' + model_name)
 
     team_to_players = load_teams(TEAMS)

@@ -48,9 +48,9 @@ import csv
 import os
 
 # Constants - file names (same as other scripts)
-ELO_RESULTS = 'trueskill_results.csv'
-TEAMS_FILE = 'Sports Elo - Teams.csv'
-GAMES_FILE = 'Sports Elo - Games.csv'
+ELO_RESULTS = 'viz/bt_mov_results.csv'
+TEAMS_FILE = 'data/Sports Elo - Teams.csv'
+GAMES_FILE = 'data/Sports Elo - Games.csv'
 INITIAL_ELO = 1000
 
 # Utility loaders (simplified, robust to missing/empty rows)

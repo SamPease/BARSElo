@@ -52,11 +52,13 @@ from data.data_loader import load_teams, load_games, parse_time_maybe
 from models.elo import EloModel
 from models.trueskill import TrueSkillModel
 from models.trueskill_mov import TrueSkillMovModel
+from models.bt_mov import BTMOVModel
 
 MODEL_CLASSES = {
     'elo': EloModel,
     'trueskill': TrueSkillModel,
     'trueskill_mov': TrueSkillMovModel,
+    'bt_mov': BTMOVModel,
 }
 
 
@@ -202,6 +204,31 @@ def run_search(config, teams_map, games, config_path=None, trials_override=None)
     search = config.get('search', {})
     trials = int(config.get('trials', 50))
     players_on_court_default = int(config.get('players_on_court_default', 8))
+
+    # Eval-only shortcut: if trials == 0, compute NLL for defaults and persist minimal outputs.
+    if trials == 0:
+        params = dict(defaults)
+        nll = evaluate_params(model_name, params, teams_map, games, players_on_court_default)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        os.makedirs(script_dir, exist_ok=True)
+        # Minimal CSV
+        csv_path = os.path.join(script_dir, f'{model_name}_hyperparam_trials.csv')
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            w = csv.writer(f)
+            w.writerow(['trial', 'value'] + list(params.keys()))
+            w.writerow([0, nll] + [params[k] for k in params.keys()])
+        # Minimal best params JSON
+        json_path = os.path.join(script_dir, f'{model_name}_best_params.json')
+        best_out = {
+            'trial': 0,
+            'value': nll,
+            'params': params,
+            'datetime': datetime.now(timezone.utc).isoformat(),
+            'eval_only': True,
+        }
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(best_out, f, indent=2)
+        return csv_path, json_path
 
     study = optuna.create_study(direction='minimize')
 
