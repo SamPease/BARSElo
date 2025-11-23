@@ -1,78 +1,184 @@
 {
-  "players_on_court_default": 8,
-  "models": {
-    "elo": {
-      "defaults": {
-        "initial_elo": 1000.0,
-        "K": 450.0,
-        "tournament_multiplier": 1.7
-      },
-      "search": {
-        "K": {"type": "float", "low": 100.0, "high": 800.0},
-        "tournament_multiplier": {"type": "float", "low": 1.0, "high": 3.0}
-      },
-      "trials": 20
+    "players_on_court_default": 8,
+    "models": {
+        "elo": {
+            "defaults": {
+                "initial_elo": 1000.0,
+                "K": 450.0,
+                "tournament_multiplier": 1.7
+            },
+            "search": {
+                "K": {
+                    "type": "float",
+                    "low": 100.0,
+                    "high": 800.0
+                },
+                "tournament_multiplier": {
+                    "type": "float",
+                    "low": 1.0,
+                    "high": 3.0
+                }
+            },
+            "trials": 20
+        },
+        "trueskill": {
+            "defaults": {
+                "mu": 1000.0
+            },
+            "search": {
+                "sigma": {
+                    "type": "float",
+                    "low": 50.0,
+                    "high": 1200.0
+                },
+                "beta": {
+                    "type": "float",
+                    "low": 20.0,
+                    "high": 2000.0
+                },
+                "tau": {
+                    "type": "float",
+                    "low": 0.001,
+                    "high": 10.0
+                },
+                "draw_probability": {
+                    "type": "float",
+                    "low": 0.0,
+                    "high": 0.5
+                }
+            },
+            "trials": 20
+        },
+        "trueskill_mov": {
+            "defaults": {
+                "mu": 1000.0
+            },
+            "search": {
+                "sigma": {
+                    "type": "float",
+                    "low": 50.0,
+                    "high": 1200.0
+                },
+                "beta": {
+                    "type": "float",
+                    "low": 20.0,
+                    "high": 2000.0
+                },
+                "tau": {
+                    "type": "float",
+                    "low": 0.001,
+                    "high": 10.0
+                },
+                "draw_probability": {
+                    "type": "float",
+                    "low": 0.0,
+                    "high": 0.5
+                }
+            },
+            "trials": 20
+        },
+        "bt_mov": {
+            "defaults": {
+                "initial_skill": 0.0,
+                "alpha": 1.0,
+                "sigma_mov": 8.0,
+                "lambda_mov": 0.02,
+                "lambda_skill": 0.001,
+                "iterations_per_update": 20,
+                "lr_skill": 0.05,
+                "lr_alpha": 0.01,
+                "mov_sigma_scale": 0.05,
+                "huber_delta": 3.0,
+                "center_mode": "mean",
+                "robust_mov": true,
+                "mov_min_reliable": 3.0,
+                "mov_reliability_exp": 1.0,
+                "roster_balance_weight": 1.0,
+                "adaptive_reg": true,
+                "display_center": 1000.0,
+                "display_scale": 100.0
+            },
+            "search": {
+                "alpha": {
+                    "type": "float",
+                    "low": 0.5,
+                    "high": 2.0
+                },
+                "sigma_mov": {
+                    "type": "float",
+                    "low": 7.0,
+                    "high": 12.0
+                },
+                "lambda_mov": {
+                    "type": "float",
+                    "low": 0.005,
+                    "high": 0.05
+                },
+                "lambda_skill": {
+                    "type": "float",
+                    "low": 0.0001,
+                    "high": 0.005,
+                    "log": true
+                },
+                "iterations_per_update": {
+                    "type": "int",
+                    "low": 5,
+                    "high": 40
+                },
+                "lr_skill": {
+                    "type": "float",
+                    "low": 0.02,
+                    "high": 0.1
+                },
+                "lr_alpha": {
+                    "type": "float",
+                    "low": 0.005,
+                    "high": 0.05
+                },
+                "mov_sigma_scale": {
+                    "type": "float",
+                    "low": 0.01,
+                    "high": 0.2
+                },
+                "huber_delta": {
+                    "type": "float",
+                    "low": 2.0,
+                    "high": 6.0
+                },
+                "mov_min_reliable": {
+                    "type": "float",
+                    "low": 2.0,
+                    "high": 5.0
+                },
+                "mov_reliability_exp": {
+                    "type": "float",
+                    "low": 0.5,
+                    "high": 2.0
+                },
+                "roster_balance_weight": {
+                    "type": "float",
+                    "low": 0.5,
+                    "high": 2.0
+                },
+                "adaptive_reg": {
+                    "type": "categorical",
+                    "choices": [
+                        true,
+                        false
+                    ]
+                }
+            },
+            "trials": 30
+        }
     },
-    "trueskill": {
-      "defaults": {"mu": 1000.0},
-      "search": {
-        "sigma": {"type": "float", "low": 50.0, "high": 1200.0},
-        "beta": {"type": "float", "low": 20.0, "high": 2000.0},
-        "tau": {"type": "float", "low": 0.001, "high": 10.0},
-        "draw_probability": {"type": "float", "low": 0.0, "high": 0.5}
-      },
-      "trials": 20
-    },
-    "trueskill_mov": {
-      "defaults": {"mu": 1000.0},
-      "search": {
-        "sigma": {"type": "float", "low": 50.0, "high": 1200.0},
-        "beta": {"type": "float", "low": 20.0, "high": 2000.0},
-        "tau": {"type": "float", "low": 0.001, "high": 10.0},
-        "draw_probability": {"type": "float", "low": 0.0, "high": 0.5}
-      },
-      "trials": 20
-    },
-    "bt_mov": {
-      "defaults": {
-        "initial_skill": 0.0,
-        "alpha": 1.0,
-        "sigma_mov": 8.0,
-        "lambda_mov": 0.02,
-        "lambda_skill": 0.001,
-        "iterations_per_update": 20,
-        "lr_skill": 0.05,
-        "lr_alpha": 0.01,
-        "mov_sigma_scale": 0.05,
-        "huber_delta": 3.0,
-        "center_mode": "mean",
-        "robust_mov": true,
-        "mov_min_reliable": 3.0,
-        "mov_reliability_exp": 1.0,
-        "roster_balance_weight": 1.0,
-        "adaptive_reg": true,
-        "display_center": 1000.0,
-        "display_scale": 100.0
-      },
-      "search": {
-        "alpha": {"type": "float", "low": 0.5, "high": 2.0},
-        "sigma_mov": {"type": "float", "low": 7.0, "high": 12.0},
-        "lambda_mov": {"type": "float", "low": 0.005, "high": 0.05},
-        "lambda_skill": {"type": "float", "low": 0.0001, "high": 0.005, "log": true},
-        "iterations_per_update": {"type": "int", "low": 5, "high": 40},
-        "lr_skill": {"type": "float", "low": 0.02, "high": 0.1},
-        "lr_alpha": {"type": "float", "low": 0.005, "high": 0.05},
-        "mov_sigma_scale": {"type": "float", "low": 0.01, "high": 0.2},
-        "huber_delta": {"type": "float", "low": 2.0, "high": 6.0},
-        "mov_min_reliable": {"type": "float", "low": 2.0, "high": 5.0},
-        "mov_reliability_exp": {"type": "float", "low": 0.5, "high": 2.0},
-        "roster_balance_weight": {"type": "float", "low": 0.5, "high": 2.0},
-        "adaptive_reg": {"type": "categorical", "choices": [true, false]}
-      },
-      "trials": 30
-    }
-  },
-  "metrics": ["nll", "brier", "accuracy"],
-  "modes": ["chrono", "new_team"],
-  "default_mode": "both"
+    "metrics": [
+        "nll",
+        "brier",
+        "accuracy"
+    ],
+    "modes": [
+        "chrono",
+        "new_team"
+    ],
+    "default_mode": "both"
 }
