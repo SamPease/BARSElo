@@ -10,6 +10,9 @@ DEFAULT_TS_BETA = None
 DEFAULT_TS_TAU = None
 DEFAULT_TS_DRAW_PROBABILITY = 0.123
 
+# TrueSkill models cannot resume because Rating objects are not easily serializable
+CAN_RESUME = False
+
 
 class TrueSkillModel(Model):
     """Uniform TrueSkill model API.

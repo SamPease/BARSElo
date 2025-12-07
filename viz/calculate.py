@@ -27,6 +27,7 @@ from models.elo import EloModel
 from models.trueskill import TrueSkillModel
 from models.trueskill_mov import TrueSkillMovModel
 from models.bt_mov import BTMOVModel
+from models.bt_mov_time_decay import BTMOVTimeDecayModel
 
 # Default model name (can be changed)
 DEFAULT_MODEL = 'elo'  # 'elo' | 'trueskill' | 'trueskill_mov'
@@ -53,9 +54,17 @@ def _write_map(filepath, header_players, data_map):
             writer.writerow(data_map[tstr])
 
 
-def run_model(model_name, team_to_players, games, all_players, output_file):
+def run_model(model_name, team_to_players, games, all_players, output_file, force_recompute=False):
     """Unified runner for all models. Chooses instantiation and per-row handling
     based on `model_name` while preserving previous behavior.
+    
+    Args:
+        model_name (str): Name of the model to run
+        team_to_players (dict): Mapping of team names to player lists
+        games (list): List of game data rows
+        all_players (list): List of all player IDs
+        output_file (str): Path to output CSV file
+        force_recompute (bool): If True, ignore existing state and recompute from scratch
     """
 
     # Instantiate the chosen model with default hyperparameters (model owns defaults)
@@ -64,6 +73,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file):
         'trueskill': TrueSkillModel,
         'trueskill_mov': TrueSkillMovModel,
         'bt_mov': BTMOVModel,
+        'bt_mov_time_decay': BTMOVTimeDecayModel,
     }
     ModelClass = model_classes.get(model_name)
     if ModelClass is None:
@@ -71,9 +81,40 @@ def run_model(model_name, team_to_players, games, all_players, output_file):
     model = ModelClass()
 
     history_map = OrderedDict()
+    last_processed_time = None
 
-    # Prepend initial row 20 minutes before earliest game
-    if games:
+    # Attempt to resume from existing state unless force_recompute is set
+    if not force_recompute and os.path.exists(output_file):
+        print(f'Found existing results at {output_file}')
+        if model.load_state(output_file, all_players):
+            print('Successfully loaded previous state. Resuming from last game...')
+            # Load existing history from CSV
+            try:
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    rows = list(reader)
+                    if len(rows) > 1:
+                        # Skip header, load all existing rows
+                        for row in rows[1:]:
+                            time_str = row[0]
+                            history_map[time_str] = row
+                        last_processed_time = rows[-1][0]
+                print(f'Loaded {len(history_map)} existing game results.')
+            except Exception as e:
+                print(f'Warning: Could not load history from {output_file}: {e}')
+                print('Starting fresh computation...')
+                history_map = OrderedDict()
+                last_processed_time = None
+        else:
+            print('Could not resume (model does not support resuming or file incompatible).')
+            print('Starting fresh computation...')
+    elif force_recompute:
+        print('Force recompute enabled. Starting fresh computation...')
+    else:
+        print('No existing results found. Starting fresh computation...')
+
+    # Prepend initial row 20 minutes before earliest game (only if starting fresh)
+    if not last_processed_time and games:
         earliest_dt = None
         for row in games:
             time_str = row[0]
@@ -88,6 +129,9 @@ def run_model(model_name, team_to_players, games, all_players, output_file):
             initial_time_str = initial_dt.strftime('%m/%d/%Y %H:%M:%S')
             history_map[initial_time_str] = [initial_time_str] + model.expose(all_players)
 
+    games_processed = 0
+    num_existing_games = len(history_map) if last_processed_time else 0
+    
     for row in games:
         # Treat every row uniformly: always pass the full row to the model.
         # `game_row` layout expected by models: [time, t1, s1, t2, s2, outcome_flag, tourney_flag, players_field]
@@ -96,6 +140,10 @@ def run_model(model_name, team_to_players, games, all_players, output_file):
         t1 = row[1] if len(row) > 1 else ''
         t2 = row[3] if len(row) > 3 else ''
 
+        # Skip games we've already processed when resuming (by checking if timestamp is in history)
+        if last_processed_time and time in history_map:
+            continue
+
         team1 = team_to_players.get(t1, [])
         team2 = team_to_players.get(t2, [])
 
@@ -103,17 +151,24 @@ def run_model(model_name, team_to_players, games, all_players, output_file):
         model.update(row, team1, team2)
         row_out = [time] + model.expose(all_players)
         history_map[time] = row_out
+        games_processed += 1
+
+    if last_processed_time:
+        print(f'Processed {games_processed} new games.')
+    else:
+        print(f'Processed {games_processed} total games.')
 
     _write_map(output_file, all_players, history_map)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov')
+    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov, bt_mov_time_decay')
+    parser.add_argument('--force', '-f', action='store_true', help='Force recompute from scratch, ignoring existing results')
     args = parser.parse_args()
 
     model_name = args.model.lower()
-    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov'):
+    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov', 'bt_mov_time_decay'):
         raise SystemExit('Unknown model: ' + model_name)
 
     team_to_players = load_teams(TEAMS)
@@ -122,7 +177,7 @@ def main():
 
     output_file = os.path.join(VIZ_DIR, f"{model_name}_results.csv")
 
-    run_model(model_name, team_to_players, games, all_players, output_file)
+    run_model(model_name, team_to_players, games, all_players, output_file, force_recompute=args.force)
 
     print('Wrote', output_file)
 

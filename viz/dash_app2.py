@@ -53,7 +53,7 @@ TEAMS_FILE = 'data/Sports Elo - Teams.csv'
 GAMES_FILE = 'data/Sports Elo - Games.csv'
 INITIAL_ELO = 1000
 
-# Utility loaders (simplified, robust to missing/empty rows)
+# Utility loaders (simplified, robust to missing/empty rows) 
 
 def load_elo_results(filename=ELO_RESULTS):
     # returns (players, dates, elo_data_df)

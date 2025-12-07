@@ -3,9 +3,8 @@ from .base import Model
 
 
 DEFAULT_INITIAL_ELO = 1000.0
-DEFAULT_K_FACTOR = 450
-DEFAULT_TOURNAMENT_MULTIPLIER = 2
-
+DEFAULT_K_FACTOR = 346.44640893667486
+DEFAULT_TOURNAMENT_MULTIPLIER = 1.5140799771798972
 
 class EloModel(Model):
     """Elo model that owns its internal state and exposes a uniform API.
@@ -109,3 +108,51 @@ class EloModel(Model):
 
     def expose(self, players):
         return [round(self.elos[p], 2) for p in players]
+
+    def load_state(self, filepath, all_players):
+        """Load Elo ratings from the last row of a results CSV.
+
+        Args:
+            filepath (str): Path to the elo_results.csv file
+            all_players (list): List of all player IDs in order
+
+        Returns:
+            bool: True if successfully loaded, False otherwise
+        """
+        import csv
+        import os
+
+        if not os.path.exists(filepath):
+            return False
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+
+            if len(rows) < 2:  # Need header + at least one data row
+                return False
+
+            header = rows[0]
+            last_row = rows[-1]
+
+            # Header is ['Time'] + player names
+            # Verify we have the right number of columns
+            if len(last_row) != len(header):
+                return False
+
+            # Load ratings from last row (skip Time column)
+            for i, player in enumerate(all_players):
+                # Find player in header (skip index 0 which is 'Time')
+                try:
+                    player_idx = header.index(player)
+                    rating = float(last_row[player_idx])
+                    self.elos[player] = rating
+                except (ValueError, IndexError):
+                    # Player not found or invalid rating, keep default
+                    continue
+
+            return True
+
+        except Exception:
+            return False

@@ -1,274 +1,403 @@
-from collections import defaultdict
-import math
-from copy import deepcopy
-from .base import Model
+"""
+Bradley-Terry with Ties (Davidson) Model with Margin of Victory Weighting.
 
-"""Bradley-Terry style player skill model with margin-of-victory (MOV) term.
+This model estimates latent player skills (theta) to predict dodgeball match outcomes.
+Team skill is the arithmetic mean of player skills on the roster.
 
-Rolling MAP estimation:
-  - After each new game, re-optimizes player skills (and alpha) using all games seen.
-  - Loss per game = logistic win/loss cross-entropy + lambda_mov * Gaussian MOV squared error.
-  - Regularization: lambda_skill * sum(s_i^2).
+The Davidson formulation handles wins, losses, and draws:
+  P(A > B) = exp(S_A - S_B) / Z
+  P(B > A) = 1 / Z
+  P(Draw) = nu / Z
+  where Z = 1 + exp(S_A - S_B) + nu
 
-Game row layout (as passed from calculate.py):
-  [time, team1_name, score1, team2_name, score2, outcome_flag, tourney_flag, players_field?]
-
-We derive winner from scores. MOV = score1 - score2 (positive => team1 wins).
-Team skill = average of player skills for players provided via calculate.py mapping.
-
-Notes / Limitations:
-  - Re-optimization is O(G * P) each step; may get slow with many games. Consider reducing iterations or using incremental approximations if needed.
-  - Lineup granularity: current framework passes full team roster each game; if per-game lineups are desired, the upstream call must supply only active players.
-  - sigma_mov kept fixed; could be optimized similarly to alpha.
+Loss function uses weighted negative log-likelihood with L2 regularization:
+  Loss = -sum[w_g * ln(Likelihood_g)] + lambda * sum(theta_i^2)
+  where w_g = 1 + ln(1 + Margin)
 """
 
-# Default hyperparameters (internal BT math baseline)
-DEFAULT_INITIAL_SKILL = 0.0          # Internal latent skill center (0)
-DEFAULT_ALPHA = 1.0                  # MOV scale on raw skill difference
-DEFAULT_SIGMA_MOV = 10.0             # Base MOV noise scale (higher for dodgeball variability)
-DEFAULT_LAMBDA_MOV = 0.01            # Weight for MOV loss term (soft guidance)
-DEFAULT_LAMBDA_SKILL = 0.001         # Regularization strength (L2 around dynamic center)
-DEFAULT_ITERATIONS = 40              # Gradient descent steps per update
-DEFAULT_LR_SKILL = 0.05              # Skill learning rate
-DEFAULT_LR_ALPHA = 0.01              # Alpha learning rate (higher to adapt)
-DEFAULT_MOV_SIGMA_SCALE = 0.05       # Heteroskedastic scaling: sigma *= (1 + scale * |mov|)
-DEFAULT_HUBER_DELTA = 3.0            # Huber threshold for robust MOV loss
-DEFAULT_CENTER_MODE = 'mean'         # 'zero' or 'mean' for regularization center
-DEFAULT_ROBUST_MOV = True            # Use Huber loss for MOV residuals
-DEFAULT_MOV_MIN_RELIABLE = 3.0       # Margin below which MOV signal is down-weighted
-DEFAULT_MOV_RELIABILITY_EXP = 1.0    # Exponent shaping growth of MOV reliability weight
-DEFAULT_ROSTER_BALANCE_WEIGHT = 1.0  # Influence of roster size balance on MOV weight
-DEFAULT_ADAPTIVE_REG = True          # Scale regularization by current skill variance
+import numpy as np
+from scipy.optimize import minimize
+from collections import defaultdict
+from .base import Model
 
-# Display-only transformation (does not affect internal optimization)
-DEFAULT_DISPLAY_CENTER = 1000.0      # Visual center (like Elo)
-DEFAULT_DISPLAY_SCALE = 100.0        # Multiply internal skill for display spread
+
+# Default hyperparameters
+DEFAULT_LAMBDA = 0.10034885180465825  # L2 regularization strength
+DEFAULT_NU = 0.0390120365292001  # Tie probability parameter
+DEFAULT_DISPLAY_CENTER = 1000.0  # Center for exposed ratings
+DEFAULT_DISPLAY_SPREAD = 200.0  # Spread for exposed ratings
 
 
 class BTMOVModel(Model):
-    def __init__(
-        self,
-        initial_skill=DEFAULT_INITIAL_SKILL,
-        alpha=DEFAULT_ALPHA,
-        sigma_mov=DEFAULT_SIGMA_MOV,
-        lambda_mov=DEFAULT_LAMBDA_MOV,
-        lambda_skill=DEFAULT_LAMBDA_SKILL,
-        iterations_per_update=DEFAULT_ITERATIONS,
-        lr_skill=DEFAULT_LR_SKILL,
-        lr_alpha=DEFAULT_LR_ALPHA,
-        mov_sigma_scale=DEFAULT_MOV_SIGMA_SCALE,
-        huber_delta=DEFAULT_HUBER_DELTA,
-        center_mode=DEFAULT_CENTER_MODE,
-        robust_mov=DEFAULT_ROBUST_MOV,
-        display_center=DEFAULT_DISPLAY_CENTER,
-        display_scale=DEFAULT_DISPLAY_SCALE,
-        mov_min_reliable=DEFAULT_MOV_MIN_RELIABLE,
-        mov_reliability_exp=DEFAULT_MOV_RELIABILITY_EXP,
-        roster_balance_weight=DEFAULT_ROSTER_BALANCE_WEIGHT,
-        adaptive_reg=DEFAULT_ADAPTIVE_REG,
-    ):
-        # Internal parameters
-        self.initial_skill = float(initial_skill)
-        self.alpha = float(alpha)
-        self.sigma_mov = float(sigma_mov)
-        self.lambda_mov = float(lambda_mov)
-        self.lambda_skill = float(lambda_skill)
-        self.iterations_per_update = int(iterations_per_update)
-        self.lr_skill = float(lr_skill)
-        self.lr_alpha = float(lr_alpha)
-        self.mov_sigma_scale = float(mov_sigma_scale)
-        self.huber_delta = float(huber_delta)
-        self.center_mode = str(center_mode)
-        self.robust_mov = bool(robust_mov)
-        # MOV reliability weighting parameters
-        self.mov_min_reliable = float(mov_min_reliable)
-        self.mov_reliability_exp = float(mov_reliability_exp)
-        self.roster_balance_weight = float(roster_balance_weight)
-        # Adaptive regularization
-        self.adaptive_reg = bool(adaptive_reg)
-        # Display parameters
-        self.display_center = float(display_center)
-        self.display_scale = float(display_scale)
-        # State
-        self.skills = defaultdict(lambda: self.initial_skill)
-        # Stored games: list of dicts with keys: team1, team2, winner, mov
-        self.games = []
-
-    # --- Utility functions ---
-    def _sigmoid(self, x):
-        """Standard logistic for BT internal probability."""
-        try:
-            return 1.0 / (1.0 + math.exp(-x))
-        except OverflowError:
-            return 0.0 if x < 0 else 1.0
-
-    def _team_avg(self, players):
-        if not players:
-            return self.initial_skill
-        return sum(self.skills[p] for p in players) / float(len(players))
-
-    # --- Core API ---
-    def update(self, game_row, team1_players, team2_players):
-        """Add a game and perform rolling MAP optimization.
-
-        game_row indices (best effort): [time, t1, s1, t2, s2, outcome_flag, tourney_flag, players_field]
-        We rely on scores s1, s2. If they fail to parse, game ignored.
+    """Bradley-Terry with Ties model using margin of victory weighting.
+    
+    Attributes:
+        lambda_reg (float): L2 regularization strength for priors
+        nu (float): Geometric tie parameter controlling draw probability
+        display_center (float): Center point for exposed ratings
+        display_spread (float): Spread factor for exposed ratings
+        theta (dict): Dictionary mapping player IDs to skill ratings (centered at 0)
+        player_ids (list): Ordered list of player IDs for optimization
+    """
+    
+    def __init__(self, lambda_reg=DEFAULT_LAMBDA, nu=DEFAULT_NU, 
+                 display_center=DEFAULT_DISPLAY_CENTER, 
+                 display_spread=DEFAULT_DISPLAY_SPREAD,
+                 warm_start=None):
+        """Initialize the Bradley-Terry MOV model.
+        
+        Args:
+            lambda_reg (float): L2 regularization strength
+            nu (float): Tie probability parameter
+            display_center (float): Center for exposed ratings
+            display_spread (float): Spread for exposed ratings  
+            warm_start (dict): Optional dictionary of player_id -> skill to initialize
         """
-        if not game_row or len(game_row) < 5:
-            return
-        try:
-            s1 = int(game_row[2])
-            s2 = int(game_row[4])
-        except Exception:
-            return  # skip malformed row
-
-        mov = s1 - s2  # positive => team1 victory margin
-        if mov > 0:
-            winner = 1  # team1
-        elif mov < 0:
-            winner = 2  # team2
+        self.lambda_reg = lambda_reg
+        self.nu = nu
+        self.display_center = display_center
+        self.display_spread = display_spread
+        
+        # Initialize player skills
+        if warm_start is None:
+            self.theta = defaultdict(float)
         else:
-            winner = 0  # draw (treated as 0.5 outcome)
-
-        # Record game
-        self.games.append({
-            'team1': list(team1_players),
-            'team2': list(team2_players),
-            'winner': winner,
-            'mov': mov,
-        })
-
-        # Rolling MAP: optimize skills & alpha on all games so far
-        self._optimize()
-
-    def _optimize(self):
+            self.theta = defaultdict(float, warm_start)
+        
+        # Track all games for batch optimization
+        self.games = []
+        self._needs_optimization = False
+        
+    def _team_skill(self, player_list):
+        """Calculate team skill as arithmetic mean of player skills.
+        
+        Args:
+            player_list (list): List of player IDs on the team
+            
+        Returns:
+            float: Mean skill of the team
+        """
+        if not player_list:
+            return 0.0
+        return np.mean([self.theta[p] for p in player_list])
+    
+    def _compute_probabilities(self, skill_a, skill_b):
+        """Compute Davidson probabilities for outcomes.
+        
+        Args:
+            skill_a (float): Team A skill
+            skill_b (float): Team B skill
+            
+        Returns:
+            tuple: (P(A>B), P(B>A), P(Draw))
+        """
+        exp_diff = np.exp(skill_a - skill_b)
+        z = 1.0 + exp_diff + self.nu
+        
+        p_a_wins = exp_diff / z
+        p_b_wins = 1.0 / z
+        p_draw = self.nu / z
+        
+        return p_a_wins, p_b_wins, p_draw
+    
+    def _game_weight(self, margin):
+        """Calculate weight for a game based on margin of victory.
+        
+        Args:
+            margin (int): Absolute margin of victory
+            
+        Returns:
+            float: Weight w_g = 1 + ln(1 + margin)
+        """
+        return 1.0 + np.log(1.0 + abs(margin))
+    
+    def _negative_log_likelihood(self, theta_vec, player_idx_map):
+        """Compute weighted negative log-likelihood with L2 regularization.
+        
+        Args:
+            theta_vec (np.array): Vector of player skills
+            player_idx_map (dict): Mapping from player_id to index in theta_vec
+            
+        Returns:
+            float: Loss value
+        """
+        # Temporary theta dict for this evaluation
+        temp_theta = {pid: theta_vec[idx] for pid, idx in player_idx_map.items()}
+        
+        nll = 0.0
+        
+        for game in self.games:
+            roster_a, roster_b, outcome, margin = game
+            
+            # Calculate team skills
+            skill_a = np.mean([temp_theta.get(p, 0.0) for p in roster_a]) if roster_a else 0.0
+            skill_b = np.mean([temp_theta.get(p, 0.0) for p in roster_b]) if roster_b else 0.0
+            
+            # Compute probabilities
+            p_a_wins, p_b_wins, p_draw = self._compute_probabilities(skill_a, skill_b)
+            
+            # Determine likelihood based on outcome
+            if outcome == 1:  # Team A wins
+                likelihood = p_a_wins
+            elif outcome == -1:  # Team B wins
+                likelihood = p_b_wins
+            else:  # Draw
+                likelihood = p_draw
+            
+            # Add small epsilon to avoid log(0)
+            likelihood = max(likelihood, 1e-10)
+            
+            # Weight by margin
+            weight = self._game_weight(margin)
+            
+            nll -= weight * np.log(likelihood)
+        
+        # Add L2 regularization
+        l2_penalty = self.lambda_reg * np.sum(theta_vec ** 2)
+        
+        return nll + l2_penalty
+    
+    def _gradient(self, theta_vec, player_idx_map):
+        """Compute gradient of the loss function.
+        
+        Args:
+            theta_vec (np.array): Vector of player skills
+            player_idx_map (dict): Mapping from player_id to index in theta_vec
+            
+        Returns:
+            np.array: Gradient vector
+        """
+        # Temporary theta dict for this evaluation
+        temp_theta = {pid: theta_vec[idx] for pid, idx in player_idx_map.items()}
+        
+        grad = np.zeros_like(theta_vec)
+        
+        for game in self.games:
+            roster_a, roster_b, outcome, margin = game
+            
+            if not roster_a or not roster_b:
+                continue
+            
+            # Calculate team skills
+            skill_a = np.mean([temp_theta.get(p, 0.0) for p in roster_a])
+            skill_b = np.mean([temp_theta.get(p, 0.0) for p in roster_b])
+            
+            # Compute probabilities
+            exp_diff = np.exp(skill_a - skill_b)
+            z = 1.0 + exp_diff + self.nu
+            
+            # Derivative components
+            # d/dS_A of log-likelihood varies by outcome
+            if outcome == 1:  # A wins
+                dL_dSa = 1.0 - exp_diff / z
+            elif outcome == -1:  # B wins
+                dL_dSa = -exp_diff / z
+            else:  # Draw
+                dL_dSa = -exp_diff / z
+            
+            # Weight and flip sign (we're minimizing negative log-likelihood)
+            weight = self._game_weight(margin)
+            dL_dSa *= -weight
+            
+            # Team A: gradient flows to all players equally (mean)
+            for p in roster_a:
+                if p in player_idx_map:
+                    grad[player_idx_map[p]] += dL_dSa / len(roster_a)
+            
+            # Team B: opposite gradient
+            for p in roster_b:
+                if p in player_idx_map:
+                    grad[player_idx_map[p]] -= dL_dSa / len(roster_b)
+        
+        # Add L2 regularization gradient
+        grad += 2 * self.lambda_reg * theta_vec
+        
+        return grad
+    
+    def _optimize_skills(self):
+        """Optimize player skills using L-BFGS-B."""
         if not self.games:
             return
-        # For stability, fewer iterations early on
-        iterations = max(5, self.iterations_per_update)
+        
+        # Get all unique players involved in games
+        all_players = set()
+        for roster_a, roster_b, _, _ in self.games:
+            all_players.update(roster_a)
+            all_players.update(roster_b)
+        
+        # Create ordered list and index mapping
+        player_list = sorted(all_players)
+        player_idx_map = {pid: idx for idx, pid in enumerate(player_list)}
+        
+        # Initialize theta vector with warm start values
+        theta_vec = np.array([self.theta[p] for p in player_list])
+        
+        # Optimize using L-BFGS-B
+        result = minimize(
+            fun=self._negative_log_likelihood,
+            x0=theta_vec,
+            args=(player_idx_map,),
+            method='L-BFGS-B',
+            jac=self._gradient,
+            options={'maxiter': 1000, 'ftol': 1e-6}
+        )
+        
+        # Update theta with optimized values
+        for pid, idx in player_idx_map.items():
+            self.theta[pid] = result.x[idx]
+    
+    def _ensure_optimized(self):
+        """Ensure skills are optimized before prediction/exposure."""
+        if self._needs_optimization:
+            self._optimize_skills()
+            self._needs_optimization = False
+    
+    def update(self, game_row, team1_players, team2_players):
+        """Update model with a new game.
+        
+        Args:
+            game_row: Game data row containing outcome and score information
+            team1_players (list): List of player IDs on team 1
+            team2_players (list): List of player IDs on team 2
+        """
+        try:
+            # Parse game row
+            time, t1, s1, t2, s2, outcome_flag, tourney_flag, players_field = (game_row + [None]*8)[:8]
+        except Exception:
+            return
+        
+        # Parse scores
+        try:
+            s1 = max(0, int(s1))
+        except Exception:
+            s1 = 0
+        try:
+            s2 = max(0, int(s2))
+        except Exception:
+            s2 = 0
+        
+        # Determine outcome and margin
+        if s1 > s2:
+            outcome = 1  # Team 1 wins
+            margin = s1 - s2
+        elif s2 > s1:
+            outcome = -1  # Team 2 wins
+            margin = s2 - s1
+        else:
+            outcome = 0  # Draw
+            margin = 0
+        
+        # Store game data
+        self.games.append((
+            list(team1_players),
+            list(team2_players),
+            outcome,
+            margin
+        ))
+        
+        # Mark that optimization is needed, but don't do it yet
+        # This allows batch optimization when needed (expose/predict/etc)
+        self._needs_optimization = True
+    
+    def expose(self, players):
+        """Return scaled ratings for display.
+        
+        Scales internal 0-centered ratings to display_center with display_spread.
+        
+        Args:
+            players (list): List of player IDs
+            
+        Returns:
+            list: Scaled ratings rounded to 2 decimal places
+        """
+        # Ensure optimization is done before exposing
+        self._ensure_optimized()
+        
+        # Get current theta values
+        raw_ratings = [self.theta[p] for p in players]
+        
+        # Scale: display_center + display_spread * theta
+        # Since theta is centered at 0, this gives a nice spread
+        scaled_ratings = [
+            self.display_center + self.display_spread * rating 
+            for rating in raw_ratings
+        ]
+        
+        return [round(r, 2) for r in scaled_ratings]
+    
+    def predict_win_prob(self, team1_players, team2_players, players_on_court=None):
+        """Predict probability that team1 beats team2.
+        
+        Args:
+            team1_players (list): List of player IDs on team 1
+            team2_players (list): List of player IDs on team 2
+            players_on_court: Unused for this model (kept for API compatibility)
+            
+        Returns:
+            float: Probability that team1 wins (not including draws)
+        """
+        # Ensure optimization is done before predicting
+        self._ensure_optimized()
+        
+        skill_a = self._team_skill(team1_players)
+        skill_b = self._team_skill(team2_players)
+        
+        p_a_wins, p_b_wins, p_draw = self._compute_probabilities(skill_a, skill_b)
+        
+        # Return probability of team1 winning
+        return p_a_wins
 
-        for _ in range(iterations):
-            # Accumulate gradients
-            grad_skill = defaultdict(float)
-            grad_alpha = 0.0
-            total_loss = 0.0
+    def load_state(self, filepath, all_players):
+        """Load player skills from the last row of a results CSV.
 
-            for g in self.games:
-                team1 = g['team1']
-                team2 = g['team2']
-                mov = g['mov']
-                winner = g['winner']
-                if not team1 or not team2:
+        This method unscales the displayed ratings back to internal 0-centered values.
+
+        Args:
+            filepath (str): Path to the bt_mov_results.csv file
+            all_players (list): List of all player IDs in order
+
+        Returns:
+            bool: True if successfully loaded, False otherwise
+        """
+        import csv
+        import os
+
+        if not os.path.exists(filepath):
+            return False
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+
+            if len(rows) < 2:  # Need header + at least one data row
+                return False
+
+            header = rows[0]
+            last_row = rows[-1]
+
+            # Header is ['Time'] + player names
+            # Verify we have the right number of columns
+            if len(last_row) != len(header):
+                return False
+
+            # Load ratings from last row and unscale them
+            # Displayed rating = display_center + display_spread * theta
+            # So: theta = (displayed_rating - display_center) / display_spread
+            for i, player in enumerate(all_players):
+                try:
+                    player_idx = header.index(player)
+                    displayed_rating = float(last_row[player_idx])
+                    # Unscale to internal 0-centered value
+                    theta = (displayed_rating - self.display_center) / self.display_spread
+                    self.theta[player] = theta
+                except (ValueError, IndexError):
+                    # Player not found or invalid rating, keep default (0.0)
                     continue
 
-                S1 = self._team_avg(team1)
-                S2 = self._team_avg(team2)
-                delta = S1 - S2
-                p1 = self._sigmoid(delta)
+            # Clear needs_optimization flag since we just loaded state
+            self._needs_optimization = False
+            return True
 
-                # Win/loss target
-                if winner == 1:
-                    y = 1.0
-                elif winner == 2:
-                    y = 0.0
-                else:
-                    y = 0.5  # treat draw as half-win
-
-                # Loss components
-                # Binary cross-entropy
-                eps = 1e-12
-                loss_wl = -(y * math.log(max(p1, eps)) + (1 - y) * math.log(max(1 - p1, eps)))
-
-                # MOV term with heteroskedastic & optional robust (Huber) loss
-                mov_pred = self.alpha * delta
-                residual = mov - mov_pred
-                # Invert previous heteroskedastic logic: SMALL margins get LARGER sigma (less weight)
-                # effective_sigma grows when |mov| is close to 0, shrinks moderately for larger margins.
-                effective_sigma = self.sigma_mov * (1.0 + self.mov_sigma_scale / (abs(mov) + 1.0))
-                if self.robust_mov:
-                    abs_r = abs(residual)
-                    if abs_r <= self.huber_delta:
-                        loss_core = 0.5 * (residual ** 2)
-                        grad_r = residual  # derivative wrt residual
-                    else:
-                        loss_core = self.huber_delta * (abs_r - 0.5 * self.huber_delta)
-                        grad_r = self.huber_delta * (1 if residual > 0 else -1)
-                else:
-                    loss_core = 0.5 * (residual ** 2)
-                    grad_r = residual
-                # Reliability weighting for MOV term
-                # 1) Margin reliability: ramp from near 0 toward 1 once |mov| exceeds mov_min_reliable
-                margin_rel = min(1.0, (abs(mov) / max(1e-6, self.mov_min_reliable))) ** self.mov_reliability_exp
-                # 2) Roster balance reliability: games with similar roster sizes more reliable
-                if team1 and team2:
-                    roster_balance = min(len(team1), len(team2)) / float(max(len(team1), len(team2)))
-                else:
-                    roster_balance = 0.0
-                roster_rel = roster_balance ** self.roster_balance_weight
-                mov_weight = margin_rel * roster_rel
-                # Final MOV loss with weight
-                loss_mov = self.lambda_mov * mov_weight * (loss_core / (effective_sigma ** 2))
-                total_loss += loss_wl + loss_mov
-
-                # Gradients
-                # d loss_wl / d delta = (p1 - y)
-                dL_dDelta = (p1 - y)
-                # MOV gradient component: lambda_mov * (-alpha * grad_r / effective_sigma^2)
-                effective_sigma = self.sigma_mov * (1.0 + self.mov_sigma_scale / (abs(mov) + 1.0))
-                dL_dDelta += self.lambda_mov * mov_weight * ( -self.alpha * grad_r / (effective_sigma ** 2) )
-
-                # Per-player contributions
-                if team1:
-                    coeff1 = 1.0 / len(team1)
-                    for p in team1:
-                        grad_skill[p] += dL_dDelta * coeff1
-                if team2:
-                    coeff2 = -1.0 / len(team2)
-                    for p in team2:
-                        grad_skill[p] += dL_dDelta * coeff2
-
-                # Gradient for alpha from MOV term only:
-                # d/d alpha [ lambda_mov * (mov - alpha*delta)^2 / (2 sigma^2) ] =
-                #   lambda_mov * (-(mov - alpha*delta) * delta / sigma^2)
-                # Gradient w.r.t alpha from MOV: lambda_mov * ( -grad_r * delta / effective_sigma^2 )
-                grad_alpha += self.lambda_mov * mov_weight * ( -grad_r * delta / (effective_sigma ** 2) )
-
-            # Regularization: center around dynamic mean if center_mode == 'mean', else around initial_skill (0)
-            if self.center_mode == 'mean' and self.skills:
-                mean_skill = sum(self.skills.values()) / len(self.skills)
-            else:
-                mean_skill = self.initial_skill
-            # Adaptive regularization: scale lambda_skill down when variance is high to avoid over-shrinking
-            if self.adaptive_reg and self.skills:
-                mean_skill_for_var = sum(self.skills.values()) / len(self.skills)
-                var_skill = sum((v - mean_skill_for_var) ** 2 for v in self.skills.values()) / len(self.skills)
-                reg_scale = 1.0 / (1.0 + var_skill)
-            else:
-                reg_scale = 1.0
-            eff_lambda_skill = self.lambda_skill * reg_scale
-            for p, val in self.skills.items():
-                deviation = val - mean_skill
-                total_loss += eff_lambda_skill * (deviation ** 2)
-                grad_skill[p] += eff_lambda_skill * 2.0 * deviation
-
-            # Gradient descent updates
-            for p, gval in grad_skill.items():
-                self.skills[p] -= self.lr_skill * gval
-            self.alpha -= self.lr_alpha * grad_alpha
-            # Soft clamp alpha to wide symmetric bounds (no sign restriction)
-            if self.alpha < -100.0:
-                self.alpha = -100.0
-            if self.alpha > 100.0:
-                self.alpha = 100.0
-
-    def predict_win_prob(self, team1_players, team2_players, players_on_court=None):
-        S1 = self._team_avg(team1_players)
-        S2 = self._team_avg(team2_players)
-        return self._sigmoid(S1 - S2)
-
-    def expose(self, players):
-        """Return displayed ratings: display_center + display_scale * internal_skill.
-
-        Internal skill is centered at 0; visual ratings centered at display_center (e.g. 1000).
-        """
-        return [round(self.display_center + self.display_scale * (self.skills[p]), 2) for p in players]
+        except Exception:
+            return False

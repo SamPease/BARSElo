@@ -9,6 +9,9 @@ DEFAULT_TS_BETA = None  # when None model will set MOV-specific beta
 DEFAULT_TS_TAU = None
 DEFAULT_TS_DRAW_PROBABILITY = 0.123
 
+# TrueSkill models cannot resume because Rating objects are not easily serializable
+CAN_RESUME = False
+
 
 class TrueSkillMovModel(Model):
     """TrueSkill MOV model with uniform `update` API.
