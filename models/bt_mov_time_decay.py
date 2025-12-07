@@ -16,11 +16,11 @@ from .base import Model
 
 
 # Default hyperparameters
-DEFAULT_LAMBDA = 0.1480086808794776  # L2 regularization strength
-DEFAULT_NU = 0.11286345205985435  # Tie probability parameter
+DEFAULT_LAMBDA = 0.04070413082944516  # L2 regularization strength
+DEFAULT_NU = 0.008753553317575144  # Tie probability parameter
 DEFAULT_DISPLAY_CENTER = 1000.0  # Center for exposed ratings
 DEFAULT_DISPLAY_SPREAD = 200.0  # Spread for exposed ratings
-DEFAULT_DECAY_BASE = 0.99  # Weekly decay factor
+DEFAULT_DECAY_BASE = 0.9628070005883128  # Weekly decay factor
 
 
 class BTMOVTimeDecayModel(Model):

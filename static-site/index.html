@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BARSElo Explorer</title>
+    
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0; padding: 20px; background: #f5f5f5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h1 { margin: 0 0 20px 0; color: #333; }
+        h2, h3, h4 { color: #333; }
+        .search-bar { margin-bottom: 20px; }
+        .search-bar input { padding: 10px; width: 60%; font-size: 14px; border: 1px solid #ddd; border-radius: 4px; }
+        .search-bar button { padding: 10px 20px; margin-left: 8px; font-size: 14px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .search-bar button:hover { background: #0052a3; }
+        .search-results { margin-top: 10px; color: #666; }
+        .tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 20px; }
+        .tab { padding: 12px 24px; cursor: pointer; border: none; background: none; font-size: 14px; color: #666; border-bottom: 3px solid transparent; transition: all 0.2s; }
+        .tab:hover { color: #0066cc; }
+        .tab.active { color: #0066cc; border-bottom-color: #0066cc; font-weight: 600; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { font-weight: 600; background: #f8f9fa; cursor: pointer; user-select: none; }
+        th:hover { background: #e9ecef; }
+        th.sorted-asc::after { content: " ▲"; font-size: 10px; }
+        th.sorted-desc::after { content: " ▼"; font-size: 10px; }
+        tr:hover { background: #f8f9fa; }
+        td a { color: #0066cc; text-decoration: none; }
+        td a:hover { text-decoration: underline; }
+        .back-link { display: inline-block; margin-bottom: 15px; color: #0066cc; text-decoration: none; }
+        .back-link:hover { text-decoration: underline; }
+        .detail-container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .detail-info { flex: 1; min-width: 300px; }
+        .detail-chart { flex: 2; min-width: 600px; }
+        .roster-table { width: 100%; margin-top: 10px; }
+        .roster-table th, .roster-table td { padding: 8px; font-size: 13px; }
+        .loading { text-align: center; padding: 40px; color: #666; }
+        .filter-input { width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .date-picker { padding: 8px; font-size: 14px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; }
+        .info-text { color: #666; font-size: 13px; margin: 8px 0; }
+        .changes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+        @media (max-width: 1000px) { .changes-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BARSElo Explorer</h1>
+        <div class="search-bar">
+            <input type="text" id="searchInput" placeholder="Find player or team (press Enter or click Go)">
+            <button onclick="handleSearch()">Go</button>
+            <div class="search-results" id="searchResults"></div>
+        </div>
+        <div class="tabs">
+            <button class="tab active" data-tab="players" onclick="switchTab('players')">Players</button>
+            <button class="tab" data-tab="teams" onclick="switchTab('teams')">Teams</button>
+            <button class="tab" data-tab="changes" onclick="switchTab('changes')">Changes</button>
+        </div>
+        <div id="pageContent" class="loading">Loading data...</div>
+    </div>
+    
+    <script src="data/elo_data.json"></script>
+    <script>
+// Global state
+let DATA = null;
+let currentTab = 'players';
+let currentSort = { table: 'players', column: 'current_elo', direction: 'desc' };
+const INITIAL_ELO = 1000;
+
+// Load data
+window.addEventListener('DOMContentLoaded', async () => {
+    try {
+        const response = await fetch('data/elo_data.json');
+        DATA = await response.json();
+        console.log('✓ Data loaded:', DATA.metadata);
+        handleRoute();
+        window.addEventListener('hashchange', handleRoute);
+    } catch (error) {
+        document.getElementById('pageContent').innerHTML = 
+            `<p style="color: red;">Error loading data: ${error.message}</p>
+             <p style="color: #666;">Run: <code>python3 -m http.server 8000</code> from static-site/ folder</p>`;
+    }
+});
+
+// Routing
+function handleRoute() {
+    const hash = window.location.hash.slice(1) || '';
+    if (hash.startsWith('/player/')) {
+        showPlayerPage(decodeURIComponent(hash.slice(8)));
+        setActiveTab('players');
+    } else if (hash.startsWith('/team/')) {
+        showTeamPage(decodeURIComponent(hash.slice(6)));
+        setActiveTab('teams');
+    } else if (hash === '/teams') {
+        showTeamsTab();
+        setActiveTab('teams');
+    } else if (hash === '/changes') {
+        showChangesTab();
+        setActiveTab('changes');
+    } else {
+        showPlayersTab();
+        setActiveTab('players');
+    }
+}
+
+function navigate(path) { window.location.hash = path; }
+
+function switchTab(tab) {
+    currentTab = tab;
+    if (tab === 'players') navigate('/');
+    else if (tab === 'teams') navigate('/teams');
+    else if (tab === 'changes') navigate('/changes');
+}
+
+function setActiveTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tab);
+    });
+}
+
+// Search
+function handleSearch() {
+    const query = document.getElementById('searchInput').value.trim().toLowerCase();
+    if (!query) return;
+    
+    const players = Object.keys(DATA.players).filter(p => p.toLowerCase().includes(query));
+    const teams = Object.keys(DATA.teams).filter(t => t.toLowerCase().includes(query));
+    
+    const exactPlayers = players.filter(p => p.toLowerCase() === query);
+    const exactTeams = teams.filter(t => t.toLowerCase() === query);
+    
+    if (exactPlayers.length === 1) { navigate('/player/' + encodeURIComponent(exactPlayers[0])); return; }
+    if (exactTeams.length === 1) { navigate('/team/' + encodeURIComponent(exactTeams[0])); return; }
+    if (players.length === 1 && teams.length === 0) { navigate('/player/' + encodeURIComponent(players[0])); return; }
+    if (teams.length === 1 && players.length === 0) { navigate('/team/' + encodeURIComponent(teams[0])); return; }
+    
+    const results = document.getElementById('searchResults');
+    if (players.length === 0 && teams.length === 0) {
+        results.textContent = 'No matches';
+    } else {
+        let html = '<div style="margin-top: 10px;">';
+        if (teams.length > 0) {
+            html += '<strong>Teams:</strong> ';
+            html += teams.slice(0, 5).map(t => `<a href="#/team/${encodeURIComponent(t)}">${escapeHtml(t)}</a>`).join(', ');
+            if (teams.length > 5) html += ` (+${teams.length - 5} more)`;
+        }
+        if (players.length > 0) {
+            if (teams.length > 0) html += '<br>';
+            html += '<strong>Players:</strong> ';
+            html += players.slice(0, 5).map(p => `<a href="#/player/${encodeURIComponent(p)}">${escapeHtml(p)}</a>`).join(', ');
+            if (players.length > 5) html += ` (+${players.length - 5} more)`;
+        }
+        html += '</div>';
+        results.innerHTML = html;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('searchInput')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleSearch();
+    });
+});
+
+// Players tab
+function showPlayersTab() {
+    const players = Object.entries(DATA.players).map(([name, stats]) => ({
+        name, ...stats,
+        win_pct: stats.games > 0 ? (stats.wins + 0.5 * stats.draws) / stats.games : null
+    }));
+    
+    if (currentSort.table !== 'players') currentSort = { table: 'players', column: 'current_elo', direction: 'desc' };
+    sortData(players, currentSort.column, currentSort.direction);
+    
+    let html = `<p>Click a player name to view details.</p>
+        <input type="text" class="filter-input" placeholder="Filter players..." onkeyup="filterTable('playerTable', 0)">
+        <table id="playerTable"><thead><tr>
+            <th onclick="sortPlayersTable('name')">Player</th>
+            <th onclick="sortPlayersTable('current_elo')">ELO</th>
+            <th onclick="sortPlayersTable('peak_elo')">Peak</th>
+            <th onclick="sortPlayersTable('min_elo')">Min</th>
+            <th onclick="sortPlayersTable('win_pct')">Win %</th>
+            <th onclick="sortPlayersTable('games')">Games</th>
+            <th onclick="sortPlayersTable('last_played')">Last Played</th>
+        </tr></thead><tbody>`;
+    
+    players.forEach(p => {
+        const wp = p.win_pct !== null ? `${(p.win_pct*100).toFixed(1)}% (W:${p.wins} L:${p.losses} T:${p.draws})` : '';
+        const lp = p.last_played ? new Date(p.last_played).toLocaleDateString() : 'Never';
+        html += `<tr>
+            <td><a href="#/player/${encodeURIComponent(p.name)}">${escapeHtml(p.name)}</a></td>
+            <td>${p.current_elo?.toFixed(2) ?? 'N/A'}</td>
+            <td>${p.peak_elo?.toFixed(2) ?? 'N/A'}</td>
+            <td>${p.min_elo?.toFixed(2) ?? 'N/A'}</td>
+            <td>${wp}</td>
+            <td>${p.games}</td>
+            <td>${lp}</td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table>';
+    document.getElementById('pageContent').innerHTML = html;
+    updateSortIndicators('playerTable', currentSort.column, currentSort.direction);
+}
+
+// Teams tab
+function showTeamsTab() {
+    const teams = Object.entries(DATA.teams).map(([name, stats]) => ({
+        name, ...stats,
+        win_pct: stats.games > 0 ? (stats.wins + 0.5 * stats.draws) / stats.games : null
+    }));
+    
+    if (currentSort.table !== 'teams') currentSort = { table: 'teams', column: 'current_elo', direction: 'desc' };
+    sortData(teams, currentSort.column, currentSort.direction);
+    
+    let html = `<p>Click a team name to view details.</p>
+        <input type="text" class="filter-input" placeholder="Filter teams..." onkeyup="filterTable('teamTable', 0)">
+        <table id="teamTable"><thead><tr>
+            <th onclick="sortTeamsTable('name')">Team</th>
+            <th onclick="sortTeamsTable('last_game')">Last Played</th>
+            <th onclick="sortTeamsTable('current_elo')">ELO</th>
+            <th onclick="sortTeamsTable('win_pct')">Win %</th>
+            <th onclick="sortTeamsTable('games')">Games</th>
+        </tr></thead><tbody>`;
+    
+    teams.forEach(t => {
+        const wp = t.win_pct !== null ? `${(t.win_pct*100).toFixed(1)}% (W:${t.wins} L:${t.losses} T:${t.draws})` : '';
+        const lp = t.last_game ? new Date(t.last_game).toLocaleDateString() : 'Never';
+        html += `<tr>
+            <td><a href="#/team/${encodeURIComponent(t.name)}">${escapeHtml(t.name)}</a></td>
+            <td>${lp}</td>
+            <td>${t.current_elo?.toFixed(2) ?? 'N/A'}</td>
+            <td>${wp}</td>
+            <td>${t.games}</td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table>';
+    document.getElementById('pageContent').innerHTML = html;
+    updateSortIndicators('teamTable', currentSort.column, currentSort.direction);
+}
+
+// Changes tab
+function showChangesTab() {
+    const timestamps = DATA.elo_history.timestamps;
+    const lastDate = timestamps.length > 0 ? timestamps[timestamps.length - 1].split('T')[0] : new Date().toISOString().split('T')[0];
+    
+    let html = `<h3>ELO Changes by Date</h3>
+        <label>Select date: <input type="date" class="date-picker" id="changesDatePicker" value="${lastDate}" onchange="updateChangesData()"></label>
+        <p class="info-text">Change from the datapoint immediately before the selected date up to the last datapoint on that date.</p>
+        <div class="changes-grid">
+            <div><h4>Teams</h4><div id="teamsChangesContainer"></div></div>
+            <div><h4>Players</h4><div id="playersChangesContainer"></div></div>
+        </div>`;
+    
+    document.getElementById('pageContent').innerHTML = html;
+    updateChangesData();
+}
+
+function updateChangesData() {
+    const datePicker = document.getElementById('changesDatePicker');
+    if (!datePicker) return;
+    const selectedDate = new Date(datePicker.value + 'T23:59:59');
+    const { players, teams } = computeChanges(selectedDate);
+    renderChangesTable('playersChangesContainer', players, true);
+    renderChangesTable('teamsChangesContainer', teams, false);
+}
+
+function computeChanges(targetDate) {
+    const timestamps = DATA.elo_history.timestamps.map(t => new Date(t));
+    const selectedDay = new Date(targetDate.toDateString());
+    
+    const gamesOnDay = DATA.games_with_scores.filter(g => {
+        const gameDate = new Date(g.datetime);
+        return gameDate.toDateString() === selectedDay.toDateString();
+    });
+    
+    const teamsPlayed = new Set();
+    const teamFirstGame = {};
+    gamesOnDay.forEach(g => {
+        if (g.team1) {
+            teamsPlayed.add(g.team1);
+            if (!teamFirstGame[g.team1] || new Date(g.datetime) < new Date(teamFirstGame[g.team1])) {
+                teamFirstGame[g.team1] = g.datetime;
+            }
+        }
+        if (g.team2) {
+            teamsPlayed.add(g.team2);
+            if (!teamFirstGame[g.team2] || new Date(g.datetime) < new Date(teamFirstGame[g.team2])) {
+                teamFirstGame[g.team2] = g.datetime;
+            }
+        }
+    });
+    
+    function getBeforeAfter(values, startTime = null) {
+        let afterIdx = -1;
+        for (let i = timestamps.length - 1; i >= 0; i--) {
+            if (timestamps[i] <= targetDate) {
+                afterIdx = i;
+                break;
+            }
+        }
+        if (afterIdx < 0) return { before: null, after: null };
+        const after = values[afterIdx];
+        
+        let beforeIdx = -1;
+        if (startTime) {
+            const start = new Date(startTime);
+            for (let i = afterIdx - 1; i >= 0; i--) {
+                if (timestamps[i] < start) {
+                    beforeIdx = i;
+                    break;
+                }
+            }
+        } else {
+            beforeIdx = afterIdx - 1;
+        }
+        const before = beforeIdx >= 0 ? values[beforeIdx] : null;
+        return { before, after };
+    }
+    
+    const playerChanges = [];
+    Object.entries(DATA.elo_history.players).forEach(([name, values]) => {
+        let startTime = null;
+        const playerTeams = DATA.players[name]?.teams || [];
+        playerTeams.forEach(team => {
+            if (teamFirstGame[team]) {
+                if (!startTime || new Date(teamFirstGame[team]) < new Date(startTime)) {
+                    startTime = teamFirstGame[team];
+                }
+            }
+        });
+        const { before, after } = getBeforeAfter(values, startTime);
+        if (before !== null && after !== null && before !== after) {
+            playerChanges.push({ name, before, after, delta: after - before });
+        }
+    });
+    
+    const teamChanges = [];
+    Array.from(teamsPlayed).forEach(teamName => {
+        const team = DATA.teams[teamName];
+        if (!team || !team.elo_history) return;
+        const startTime = teamFirstGame[teamName];
+        const { before, after } = getBeforeAfter(team.elo_history, startTime);
+        if (before !== null && after !== null) {
+            const delta = after - before;
+            const winPct = team.games > 0 ? (team.wins + 0.5 * team.draws) / team.games : null;
+            teamChanges.push({ name: teamName, before, after, delta, wins: team.wins, losses: team.losses, draws: team.draws, win_pct: winPct });
+        }
+    });
+    
+    function addRanks(changes) {
+        const beforeSorted = [...changes].sort((a, b) => (b.before || 0) - (a.before || 0));
+        beforeSorted.forEach((item, idx) => {
+            const original = changes.find(c => c.name === item.name);
+            if (original) original.rank_before = idx + 1;
+        });
+        const afterSorted = [...changes].sort((a, b) => (b.after || 0) - (a.after || 0));
+        afterSorted.forEach((item, idx) => {
+            const original = changes.find(c => c.name === item.name);
+            if (original) original.rank_after = idx + 1;
+        });
+        changes.forEach(item => {
+            if (item.rank_before && item.rank_after) {
+                item.rank_change = item.rank_after - item.rank_before;
+            }
+        });
+    }
+    
+    addRanks(playerChanges);
+    addRanks(teamChanges);
+    playerChanges.sort((a, b) => (a.rank_change || 0) - (b.rank_change || 0));
+    teamChanges.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    
+    return { players: playerChanges, teams: teamChanges };
+}
+
+function renderChangesTable(containerId, data, isPlayers) {
+    if (!data || data.length === 0) {
+        document.getElementById(containerId).innerHTML = '<p class="info-text">No changes on selected date.</p>';
+        return;
+    }
+    
+    let html = '<table><thead><tr>';
+    html += `<th>${isPlayers ? 'Player' : 'Team'}</th><th>Before</th><th>After</th><th>Delta</th>`;
+    html += '<th>Rank Before</th><th>Rank After</th><th>Rank Change</th>';
+    if (!isPlayers) html += '<th>Win %</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.forEach(item => {
+        const link = isPlayers 
+            ? `<a href="#/player/${encodeURIComponent(item.name)}">${escapeHtml(item.name)}</a>`
+            : `<a href="#/team/${encodeURIComponent(item.name)}">${escapeHtml(item.name)}</a>`;
+        const rc = item.rank_change ? (item.rank_change < 0 ? `↑${Math.abs(item.rank_change)}` : item.rank_change > 0 ? `↓${item.rank_change}` : '0') : '';
+        const ds = item.delta > 0 ? 'color: green;' : item.delta < 0 ? 'color: red;' : '';
+        html += `<tr><td>${link}</td><td>${item.before?.toFixed(2) ?? 'N/A'}</td><td>${item.after?.toFixed(2) ?? 'N/A'}</td>`;
+        html += `<td style="${ds}">${item.delta > 0 ? '+' : ''}${item.delta?.toFixed(2) ?? 'N/A'}</td>`;
+        html += `<td>${item.rank_before || 'N/A'}</td><td>${item.rank_after || 'N/A'}</td><td>${rc}</td>`;
+        if (!isPlayers) {
+            const wp = item.win_pct !== null && item.win_pct !== undefined ? `${(item.win_pct*100).toFixed(1)}% (W:${item.wins} L:${item.losses} T:${item.draws})` : '';
+            html += `<td>${wp}</td>`;
+        }
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById(containerId).innerHTML = html;
+}
+
+// Player page
+function showPlayerPage(playerName) {
+    const player = DATA.players[playerName];
+    if (!player) {
+        document.getElementById('pageContent').innerHTML = `<p>Player not found: ${escapeHtml(playerName)}</p><a href="#/" class="back-link">← Back</a>`;
+        return;
+    }
+    
+    const allElos = Object.values(DATA.players).map(p => p.current_elo).filter(e => e !== null).sort((a, b) => b - a);
+    const rank = player.current_elo ? allElos.indexOf(player.current_elo) + 1 : null;
+    const percentile = rank ? (100 * (allElos.length - rank + 1) / allElos.length).toFixed(1) : null;
+    const winPct = player.games > 0 ? (100 * (player.wins + 0.5 * player.draws) / player.games).toFixed(1) : 'N/A';
+    
+    let teamsTable = '<table class="roster-table"><thead><tr><th>Team</th><th>Last Played</th><th>Team ELO</th><th>Win %</th></tr></thead><tbody>';
+    player.teams.forEach(teamName => {
+        const team = DATA.teams[teamName];
+        if (team) {
+            const twp = team.games > 0 ? `${(100*(team.wins+0.5*team.draws)/team.games).toFixed(1)}% (W:${team.wins} L:${team.losses} T:${team.draws})` : 'N/A';
+            const lp = team.last_game ? new Date(team.last_game).toLocaleDateString() : 'Never';
+            teamsTable += `<tr><td><a href="#/team/${encodeURIComponent(teamName)}">${escapeHtml(teamName)}</a></td>`;
+            teamsTable += `<td>${lp}</td><td>${team.current_elo?.toFixed(2) ?? 'N/A'}</td><td>${twp}</td></tr>`;
+        }
+    });
+    teamsTable += '</tbody></table>';
+    
+    let html = `<a href="#/" class="back-link">← Back to Players</a>
+        <div class="detail-container">
+            <div class="detail-info">
+                <h2>${escapeHtml(playerName)}</h2>
+                <p><strong>ELO:</strong> ${player.current_elo?.toFixed(2) ?? 'N/A'}${rank ? ` (Rank #${rank}, ${percentile}th percentile)` : ''}</p>
+                <p><strong>Peak ELO:</strong> ${player.peak_elo?.toFixed(2) ?? 'N/A'}</p>
+                <p><strong>Min ELO:</strong> ${player.min_elo?.toFixed(2) ?? 'N/A'}</p>
+                <p><strong>Record:</strong> ${player.wins}-${player.losses}-${player.draws} (${winPct}%)</p>
+                <p><strong>Games:</strong> ${player.games}</p>
+                <h3>Teams</h3>${teamsTable}
+            </div>
+            <div class="detail-chart"><div id="playerChart"></div></div>
+        </div>`;
+    
+    document.getElementById('pageContent').innerHTML = html;
+    renderPlayerChart(playerName);
+}
+
+// Team page
+function showTeamPage(teamName) {
+    const team = DATA.teams[teamName];
+    if (!team) {
+        document.getElementById('pageContent').innerHTML = `<p>Team not found: ${escapeHtml(teamName)}</p><a href="#/teams" class="back-link">← Back</a>`;
+        return;
+    }
+    
+    const allTeamElos = Object.values(DATA.teams).map(t => t.current_elo).filter(e => e !== null).sort((a, b) => b - a);
+    const rank = team.current_elo ? allTeamElos.indexOf(team.current_elo) + 1 : null;
+    const percentile = rank ? (100 * (allTeamElos.length - rank + 1) / allTeamElos.length).toFixed(1) : null;
+    const winPct = team.games > 0 ? (100 * (team.wins + 0.5 * team.draws) / team.games).toFixed(1) : 'N/A';
+    
+    let rosterTable = '<table class="roster-table"><thead><tr><th>Player</th><th>ELO</th><th>Rank</th><th>Percentile</th></tr></thead><tbody>';
+    const allPlayerElos = Object.entries(DATA.players).map(([name, stats]) => ({ name, elo: stats.current_elo })).filter(p => p.elo !== null).sort((a, b) => b.elo - a.elo);
+    team.members.forEach(playerName => {
+        const player = DATA.players[playerName];
+        if (player) {
+            const pRank = player.current_elo ? allPlayerElos.findIndex(p => p.name === playerName) + 1 : null;
+            const pPercentile = pRank ? (100 * (allPlayerElos.length - pRank + 1) / allPlayerElos.length).toFixed(1) : null;
+            rosterTable += `<tr><td><a href="#/player/${encodeURIComponent(playerName)}">${escapeHtml(playerName)}</a></td>`;
+            rosterTable += `<td>${player.current_elo?.toFixed(2) ?? 'N/A'}</td><td>${pRank ? `#${pRank}` : 'N/A'}</td>`;
+            rosterTable += `<td>${pPercentile ? `${pPercentile}%` : 'N/A'}</td></tr>`;
+        }
+    });
+    rosterTable += '</tbody></table>';
+    
+    let html = `<a href="#/teams" class="back-link">← Back to Teams</a>
+        <div class="detail-container">
+            <div class="detail-info">
+                <h2>${escapeHtml(teamName)}</h2>
+                <p><strong>ELO:</strong> ${team.current_elo?.toFixed(2) ?? 'N/A'}${rank ? ` (Rank #${rank}, ${percentile}th percentile)` : ''}</p>
+                <p><strong>Record:</strong> ${team.wins}-${team.losses}-${team.draws} (${winPct}%)</p>
+                <p><strong>Games:</strong> ${team.games}</p>
+                <p><strong>First Game:</strong> ${team.first_game ? new Date(team.first_game).toLocaleDateString() : 'Never'}</p>
+                <p><strong>Last Game:</strong> ${team.last_game ? new Date(team.last_game).toLocaleDateString() : 'Never'}</p>
+                <h3>Roster</h3>${rosterTable}
+            </div>
+            <div class="detail-chart"><div id="teamChart"></div></div>
+        </div>`;
+    
+    document.getElementById('pageContent').innerHTML = html;
+    renderTeamChart(teamName);
+}
+
+// Player chart
+function renderPlayerChart(playerName) {
+    const playerElos = DATA.elo_history.players[playerName];
+    if (!playerElos) return;
+    
+    const timestamps = DATA.elo_history.timestamps.map(t => new Date(t));
+    const player = DATA.players[playerName];
+    let startIdx = 0, endIdx = timestamps.length - 1;
+    
+    if (player.teams && player.teams.length > 0) {
+        const teamGames = DATA.games.filter(g => player.teams.includes(g.team1) || player.teams.includes(g.team2));
+        if (teamGames.length > 0) {
+            const gameDates = teamGames.map(g => new Date(g.datetime));
+            const firstGame = new Date(Math.min(...gameDates));
+            const lastGame = new Date(Math.max(...gameDates));
+            for (let i = 0; i < timestamps.length; i++) {
+                if (timestamps[i] < firstGame) startIdx = i;
+                if (timestamps[i] <= lastGame) endIdx = i;
+            }
+            startIdx = Math.max(0, startIdx);
+        }
+    }
+    
+    const plotTimestamps = timestamps.slice(startIdx, endIdx + 1);
+    const plotElos = playerElos.slice(startIdx, endIdx + 1);
+    const traces = [{ x: plotTimestamps, y: plotElos, mode: 'lines', name: playerName, line: { color: 'blue', width: 2 }, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+playerName+'</extra>' }];
+    
+    const colors = ['red', 'green', 'purple', 'orange', 'brown'];
+    player.teams.forEach((teamName, idx) => {
+        const team = DATA.teams[teamName];
+        if (!team || !team.elo_history) return;
+        const teamGames = DATA.games.filter(g => g.team1 === teamName || g.team2 === teamName);
+        if (teamGames.length === 0) return;
+        const teamGameDates = teamGames.map(g => new Date(g.datetime));
+        const teamFirst = new Date(Math.min(...teamGameDates));
+        const teamLast = new Date(Math.max(...teamGameDates));
+        let tStart = 0, tEnd = timestamps.length - 1;
+        for (let i = 0; i < timestamps.length; i++) {
+            if (timestamps[i] < teamFirst) tStart = i;
+            if (timestamps[i] <= teamLast) tEnd = i;
+        }
+        tStart = Math.max(0, tStart);
+        const teamPlotTimestamps = timestamps.slice(tStart, tEnd + 1);
+        const teamPlotElos = team.elo_history.slice(tStart, tEnd + 1);
+        traces.push({ x: teamPlotTimestamps, y: teamPlotElos, mode: 'lines', name: teamName, line: { color: colors[idx % colors.length], dash: 'dash', width: 2 }, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+teamName+'</extra>' });
+    });
+    
+    traces.push({ x: plotTimestamps, y: Array(plotTimestamps.length).fill(INITIAL_ELO), mode: 'lines', name: 'Starting ELO', line: { color: 'red', dash: 'dash', width: 1 }, hoverinfo: 'skip', showlegend: false });
+    const layout = { title: `${playerName} ELO History`, xaxis: { title: 'Date' }, yaxis: { title: 'ELO Rating' }, height: 600, hovermode: 'x unified', legend: { orientation: 'h', y: 1.1 } };
+    Plotly.newPlot('playerChart', traces, layout, { responsive: true });
+}
+
+// Team chart
+function renderTeamChart(teamName) {
+    const team = DATA.teams[teamName];
+    if (!team || !team.elo_history) return;
+    
+    const timestamps = DATA.elo_history.timestamps.map(t => new Date(t));
+    let startIdx = 0, endIdx = timestamps.length - 1;
+    
+    if (team.first_game && team.last_game) {
+        const firstGame = new Date(team.first_game);
+        const lastGame = new Date(team.last_game);
+        for (let i = 0; i < timestamps.length; i++) {
+            if (timestamps[i] < firstGame) startIdx = i;
+            if (timestamps[i] <= lastGame) endIdx = i;
+        }
+        startIdx = Math.max(0, startIdx);
+    }
+    
+    const plotTimestamps = timestamps.slice(startIdx, endIdx + 1);
+    const plotElos = team.elo_history.slice(startIdx, endIdx + 1);
+    const traces = [{ x: plotTimestamps, y: plotElos, mode: 'lines+markers', name: `${teamName} (Team Avg)`, line: { color: 'black', width: 3 }, marker: { size: 6 }, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+teamName+'</extra>' }];
+    
+    const colors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray'];
+    team.members.forEach((playerName, idx) => {
+        const playerElos = DATA.elo_history.players[playerName];
+        if (!playerElos) return;
+        const playerPlotElos = playerElos.slice(startIdx, endIdx + 1);
+        traces.push({ x: plotTimestamps, y: playerPlotElos, mode: 'lines', name: playerName, line: { color: colors[idx % colors.length], width: 1.5 }, opacity: 0.7, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+playerName+'</extra>' });
+    });
+    
+    traces.push({ x: plotTimestamps, y: Array(plotTimestamps.length).fill(INITIAL_ELO), mode: 'lines', name: 'Starting ELO', line: { color: 'red', dash: 'dash', width: 1 }, hoverinfo: 'skip', showlegend: false });
+    const shapes = [];
+    if (team.first_game && team.last_game) {
+        shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: new Date(team.first_game), x1: new Date(team.last_game), y0: 0, y1: 1, fillcolor: 'lightblue', opacity: 0.2, line: { width: 0 }, layer: 'below' });
+    }
+    const layout = { title: `${teamName} ELO History`, xaxis: { title: 'Date' }, yaxis: { title: 'Team ELO Rating' }, height: 600, hovermode: 'x unified', legend: { orientation: 'h', y: 1.1 }, shapes: shapes };
+    Plotly.newPlot('teamChart', traces, layout, { responsive: true });
+}
+
+// Utilities
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function sortData(arr, column, direction) {
+    arr.sort((a, b) => {
+        let aVal = a[column], bVal = b[column];
+        if (aVal === null || aVal === undefined) return 1;
+        if (bVal === null || bVal === undefined) return -1;
+        if (typeof aVal === 'string') { aVal = aVal.toLowerCase(); bVal = bVal.toLowerCase(); }
+        const cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+        return direction === 'asc' ? cmp : -cmp;
+    });
+}
+
+function sortPlayersTable(column) {
+    if (currentSort.column === column && currentSort.table === 'players') {
+        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        currentSort = { table: 'players', column, direction: column === 'name' ? 'asc' : 'desc' };
+    }
+    showPlayersTab();
+}
+
+function sortTeamsTable(column) {
+    if (currentSort.column === column && currentSort.table === 'teams') {
+        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        currentSort = { table: 'teams', column, direction: column === 'name' ? 'asc' : 'desc' };
+    }
+    showTeamsTab();
+}
+
+function updateSortIndicators(tableId, column, direction) {
+    const table = document.getElementById(tableId);
+    if (!table) return;
+    const columnMap = { 'name': 0, 'current_elo': 1, 'peak_elo': 2, 'min_elo': 3, 'win_pct': 4, 'games': 5, 'last_played': 6, 'last_game': 1 };
+    const headers = table.querySelectorAll('th');
+    headers.forEach(th => th.classList.remove('sorted-asc', 'sorted-desc'));
+    const headerIdx = columnMap[column];
+    if (headerIdx !== undefined && headers[headerIdx]) {
+        headers[headerIdx].classList.add(direction === 'asc' ? 'sorted-asc' : 'sorted-desc');
+    }
+}
+
+function filterTable(tableId, columnIndex) {
+    const input = document.querySelector('.filter-input');
+    if (!input) return;
+    const filter = input.value.toLowerCase();
+    const table = document.getElementById(tableId);
+    if (!table) return;
+    const rows = table.getElementsByTagName('tr');
+    for (let i = 1; i < rows.length; i++) {
+        const cell = rows[i].getElementsByTagName('td')[columnIndex];
+        if (cell) {
+            const text = cell.textContent || cell.innerText;
+            rows[i].style.display = text.toLowerCase().indexOf(filter) > -1 ? '' : 'none';
+        }
+    }
+}
+    </script>
+</body>
+</html>
