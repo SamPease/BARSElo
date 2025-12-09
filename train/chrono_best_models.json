@@ -1,27 +1,29 @@
 {
   "mode": "chrono",
-  "datetime": "2025-12-07T02:05:26.325858+00:00",
+  "datetime": "2025-12-09T04:22:40.200211+00:00",
   "models": {
-    "elo": {
-      "best_value": 0.6464013304335678,
+    "bt_mov": {
+      "best_value": 0.6477267214632642,
       "objective_metric": "nll",
       "params": {
-        "initial_elo": 1000.0,
-        "K": 726.0678981832951,
-        "tournament_multiplier": 1.3199534176819347
+        "display_center": 1000.0,
+        "display_spread": 200.0,
+        "lambda_reg": 0.07587282485077798,
+        "nu": 0.0029138223917911585,
+        "tau": 13.329020335537031
       },
       "mode_metrics": {
-        "nll": 0.6464013304335678,
-        "brier": 0.22821904895849374,
-        "accuracy": 0.6062874251497006,
-        "games_scored": 668
+        "nll": 0.6477267214632642,
+        "brier": 0.22868025600081265,
+        "accuracy": 0.6077265973254086,
+        "games_scored": 673
       },
-      "trial": 1,
-      "trials": 2,
+      "trial": 59,
+      "trials": 100,
       "cross_mode_metrics": {
-        "mean_nll": 0.6798329900577587,
-        "mean_brier": 0.24409131174340243,
-        "mean_accuracy": 0.5383436349926316,
+        "mean_nll": 0.6730390112565495,
+        "mean_brier": 0.2405639749297903,
+        "mean_accuracy": 0.5547198972511355,
         "teams_scored": 139
       }
     }

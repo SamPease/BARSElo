@@ -79,22 +79,27 @@
         },
         "bt_mov": {
             "defaults": {
-                "lambda_reg": 0.15,
-                "nu": 0.11
+                "display_center": 1000.0,
+                "display_spread": 200.0
             },
             "search": {
                 "lambda_reg": {
                     "type": "log",
                     "low": 0.001,
-                    "high": 10.0
+                    "high": 1.0
                 },
                 "nu": {
-                    "type": "float",
-                    "low": 0.01,
+                    "type": "log",
+                    "low": 0.001,
                     "high": 0.5
+                },
+                "sigma": {
+                    "type": "float",
+                    "low": 1.0,
+                    "high": 10.0
                 }
             },
-            "trials": 100
+            "trials": 200
         },
         "bt_mov_time_decay": {
             "defaults": {
