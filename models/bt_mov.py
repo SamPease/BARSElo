@@ -1,23 +1,21 @@
 """
-Davidson Model with Margin of Victory Likelihood.
+Bradley-Terry Model with Margin of Victory Likelihood.
 
 This model estimates latent player skills (theta) to predict dodgeball match outcomes.
 Team skill is the arithmetic mean of player skills on the roster.
 
 The model combines:
-  1. Davidson probabilities for W-D-L outcomes:
-     P(i wins) = r / (1 + r + ν*r)
-     P(j wins) = 1 / (1 + r + ν*r)
-     P(draw) = ν*r / (1 + r + ν*r)
-     where d = s_i - s_j, r = exp(d), ν is the tie parameter
+  1. Bradley-Terry probabilities for W-L outcomes:
+     P(A wins) = r / (1 + r)
+     P(B wins) = 1 / (1 + r)
+     where d = s_A - s_B, r = exp(d)
 
-  2. Margin likelihood (only when no draw and margin observed):
+  2. Margin likelihood (only when margin observed):
      ℓ_margin = -0.5*log(2πσ²) - (d-m)²/(2σ²)  [Gaussian distribution]
 
 Combined likelihood:
-  - Non-draw with margin: ℓ = log(P_Davidson(outcome)) + ℓ_margin
-  - Non-draw outcome-only: ℓ = log(P_Davidson(outcome))
-  - Draw: ℓ = log(P_Davidson(draw))  [no margin term]
+  - With margin: ℓ = log(P_BradleyTerry(outcome)) + ℓ_margin
+  - Outcome-only: ℓ = log(P_BradleyTerry(outcome))
 
 Loss function uses negative log-likelihood with L2 regularization:
   Loss = -sum[ℓ_g] + lambda * sum(theta_i^2)
@@ -31,9 +29,8 @@ from .base import Model
 
 
 # Default hyperparameters
-DEFAULT_LAMBDA = 0.07587282485077798  # L2 regularization strength
-DEFAULT_NU = 0.0029138223917911585  # Davidson tie probability parameter
-DEFAULT_SIGMA = 3.08  # Margin noise scale (Gaussian/Normal distribution parameter)
+DEFAULT_LAMBDA = 0.06129515109251031  # L2 regularization strength
+DEFAULT_SIGMA = 5.903207466977128  # Margin noise scale (Gaussian/Normal distribution parameter)
 
 # Visualization parameters
 
@@ -42,33 +39,30 @@ DEFAULT_DISPLAY_SPREAD = 200.0  # Spread for exposed ratings
 
 
 class BTMOVModel(Model):
-    """Davidson model with margin of victory likelihood.
+    """Bradley-Terry model with margin of victory likelihood.
     
     Attributes:
         lambda_reg (float): L2 regularization strength for priors
-        nu (float): Davidson tie probability parameter
         sigma (float): Noise scale parameter for margin distribution (Gaussian/Normal)
         display_center (float): Center point for exposed ratings
         display_spread (float): Spread factor for exposed ratings
         theta (dict): Dictionary mapping player IDs to skill ratings (centered at 0)
     """
     
-    def __init__(self, lambda_reg=DEFAULT_LAMBDA, nu=DEFAULT_NU, sigma=DEFAULT_SIGMA,
+    def __init__(self, lambda_reg=DEFAULT_LAMBDA, sigma=DEFAULT_SIGMA,
                  display_center=DEFAULT_DISPLAY_CENTER, 
                  display_spread=DEFAULT_DISPLAY_SPREAD,
                  warm_start=None):
-        """Initialize the Davidson + MOV model.
+        """Initialize the Bradley-Terry + MOV model.
         
         Args:
             lambda_reg (float): L2 regularization strength
-            nu (float): Davidson tie probability parameter
             sigma (float): Margin noise scale parameter (Gaussian standard deviation)
             display_center (float): Center for exposed ratings
             display_spread (float): Spread for exposed ratings  
             warm_start (dict): Optional dictionary of player_id -> skill to initialize
         """
         self.lambda_reg = lambda_reg
-        self.nu = nu
         self.sigma = sigma
         self.display_center = display_center
         self.display_spread = display_spread
@@ -96,32 +90,26 @@ class BTMOVModel(Model):
             return 0.0
         return np.mean([self.theta[p] for p in player_list])
     
-    def _compute_probabilities(self, skill_a, skill_b, nu=None):
-        """Compute Davidson probabilities with symmetric geometric mean for ties.
+    def _compute_probabilities(self, skill_a, skill_b):
+        """Compute Bradley-Terry probabilities for binary outcome.
         
         Args:
             skill_a (float): Team A skill
             skill_b (float): Team B skill
-            nu (float, optional): Tie parameter override. If None, uses self.nu
             
         Returns:
-            tuple: (P(A wins), P(B wins), P(draw))
+            tuple: (P(A wins), P(B wins))
         """
         d = skill_a - skill_b
         r = np.exp(d)
-        # Use provided nu or default to self.nu
-        nu_val = nu if nu is not None else self.nu
         
-        # CORRECTED: Use sqrt(r) for the tie term to ensure symmetry
-        # z = 1 + r + nu * sqrt(r)
-        sqrt_r = np.sqrt(r)
-        z = 1.0 + r + nu_val * sqrt_r
+        # Bradley-Terry model: binary probabilities
+        z = 1.0 + r
         
         p_a_wins = r / z
         p_b_wins = 1.0 / z
-        p_draw = nu_val * sqrt_r / z
         
-        return p_a_wins, p_b_wins, p_draw
+        return p_a_wins, p_b_wins
     
     def _margin_likelihood(self, d, signed_margin):
         """Compute Gaussian margin likelihood.
@@ -146,7 +134,7 @@ class BTMOVModel(Model):
         return term1 + term2
     
     def _negative_log_likelihood(self, theta_vec, player_idx_map):
-        """Compute negative log-likelihood (Davidson + MOV).
+        """Compute negative log-likelihood (Bradley-Terry + MOV).
         
         Args:
             theta_vec (np.array): Vector of player skills
@@ -169,17 +157,17 @@ class BTMOVModel(Model):
             
             d = skill_a - skill_b
             
-            # Davidson probabilities (use nu=0 for tournament games)
-            nu_val = 0.0 if is_tournament else None
-            p_a_wins, p_b_wins, p_draw = self._compute_probabilities(skill_a, skill_b, nu=nu_val)
+            # Bradley-Terry probabilities (binary: no draw)
+            p_a_wins, p_b_wins = self._compute_probabilities(skill_a, skill_b)
             
             # Outcome likelihood
             if outcome == 1:
                 ll_outcome = np.log(max(p_a_wins, 1e-10))
             elif outcome == -1:
                 ll_outcome = np.log(max(p_b_wins, 1e-10))
-            else:
-                ll_outcome = np.log(max(p_draw, 1e-10))
+            else:  # outcome == 0 (draw)
+                # Draws are treated as ties: split probability 50/50
+                ll_outcome = np.log(0.5)
             
             # Margin likelihood (Gaussian)
             ll_margin = 0.0
@@ -196,10 +184,10 @@ class BTMOVModel(Model):
         return nll + l2_penalty
     
     def _gradient(self, theta_vec, player_idx_map):
-        """Compute gradient of the loss function with Davidson + MOV.
+        """Compute gradient of the loss function with Bradley-Terry + MOV.
         
         Derivatives of:
-        - Davidson log-probabilities (CORRECTED for sqrt(r) formula)
+        - Bradley-Terry log-probabilities (binary model)
         - Margin likelihood: Gaussian ℓ_margin = -0.5*log(σ²) - (d-m)²/(2σ²)
         
         Args:
@@ -225,23 +213,23 @@ class BTMOVModel(Model):
             skill_b = np.mean([temp_theta.get(p, 0.0) for p in roster_b])
             d = skill_a - skill_b
             
-            # --- Davidson Gradient (Outcomes) ---
+            # --- Bradley-Terry Gradient (Binary outcomes) ---
             r = np.exp(d)
-            s = np.sqrt(r)  # using sqrt(r) for symmetric ties
-            nu_val = 0.0 if is_tournament else self.nu
-            z = 1.0 + r + nu_val * s
+            z = 1.0 + r
             
-            # Derivatives of log probabilities wrt d
-            dL_A_dd = 1.0 - (r + 0.5 * nu_val * s) / z
-            dL_B_dd = -(r + 0.5 * nu_val * s) / z
-            dL_D_dd = 0.5 - (r + 0.5 * nu_val * s) / z  # derived from 0.5*s'/s - z'/z
+            # Derivatives of log probabilities wrt d:
+            # d/dd log(P_A) = d/dd [d - log(1+r)] = 1 - r/(1+r) = 1/(1+r)
+            # d/dd log(P_B) = d/dd [-log(1+r)] = -r/(1+r)
+            dL_A_dd = 1.0 / z
+            dL_B_dd = -r / z
 
             if outcome == 1:
                 dL_OO_dd = dL_A_dd
             elif outcome == -1:
                 dL_OO_dd = dL_B_dd
-            else:
-                dL_OO_dd = dL_D_dd
+            else:  # outcome == 0 (draw)
+                # For draws, treat as 50/50: gradient is 0
+                dL_OO_dd = 0.0
             
             # --- Gaussian Margin Gradient ---
             dL_margin_dd = 0.0
@@ -407,9 +395,9 @@ class BTMOVModel(Model):
         skill_a = self._team_skill(team1_players)
         skill_b = self._team_skill(team2_players)
         
-        p_a_wins, p_b_wins, p_draw = self._compute_probabilities(skill_a, skill_b)
+        p_a_wins, p_b_wins = self._compute_probabilities(skill_a, skill_b)
         
-        # Return probability of team1 winning (normalized to exclude draws)
+        # Return probability of team1 winning
         return p_a_wins
 
     def load_state(self, filepath, all_players):

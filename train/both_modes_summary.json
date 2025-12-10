@@ -1,228 +1,56 @@
 {
-  "datetime": "2025-11-23T05:35:31.711793+00:00",
+  "datetime": "2025-12-09T06:31:29.888636+00:00",
   "chrono": {
-    "elo": {
-      "best_value": 0.6433633721274383,
-      "objective_metric": "nll",
-      "params": {
-        "initial_elo": 1000.0,
-        "K": 453.92639881691434,
-        "tournament_multiplier": 2.529495488697522
-      },
-      "mode_metrics": {
-        "nll": 0.6433633721274383,
-        "brier": 0.2270284434834248,
-        "accuracy": 0.6067073170731707,
-        "games_scored": 656
-      },
-      "trial": 2,
-      "trials": 3,
-      "cross_mode_metrics": {
-        "mean_nll": 0.6790015581393366,
-        "mean_brier": 0.24376832690517233,
-        "mean_accuracy": 0.5447749335102611,
-        "teams_scored": 139
-      }
-    },
-    "trueskill": {
-      "best_value": 0.6610165907457022,
-      "objective_metric": "nll",
-      "params": {
-        "mu": 1000.0,
-        "sigma": 587.1412972976559,
-        "beta": 1757.2079967947998,
-        "tau": 0.878287599809708,
-        "draw_probability": 0.024287549977457856
-      },
-      "mode_metrics": {
-        "nll": 0.6610165907457022,
-        "brier": 0.23433980909272234,
-        "accuracy": 0.5945121951219512,
-        "games_scored": 656
-      },
-      "trial": 1,
-      "trials": 3,
-      "cross_mode_metrics": {
-        "mean_nll": 0.6805213767577349,
-        "mean_brier": 0.2438867470371941,
-        "mean_accuracy": 0.5213483054452384,
-        "teams_scored": 139
-      }
-    },
-    "trueskill_mov": {
-      "best_value": 0.6457043501756815,
-      "objective_metric": "nll",
-      "params": {
-        "mu": 1000.0,
-        "sigma": 770.0483629281493,
-        "beta": 1953.223925092316,
-        "tau": 4.874380629899171,
-        "draw_probability": 0.0124182538756763
-      },
-      "mode_metrics": {
-        "nll": 0.6457043501756815,
-        "brier": 0.22787745272371834,
-        "accuracy": 0.6036585365853658,
-        "games_scored": 656
-      },
-      "trial": 1,
-      "trials": 3,
-      "cross_mode_metrics": {
-        "mean_nll": 0.6875760272734707,
-        "mean_brier": 0.2473237120496322,
-        "mean_accuracy": 0.5379210874951125,
-        "teams_scored": 139
-      }
-    },
     "bt_mov": {
-      "best_value": 0.6634545837250703,
+      "best_value": 0.6342428518049888,
       "objective_metric": "nll",
       "params": {
-        "initial_skill": 0.0,
-        "alpha": 0.7814753817368669,
-        "sigma_mov": 8.650824965153767,
-        "lambda_mov": 0.022471844163200368,
-        "lambda_skill": 0.00284091366173557,
-        "iterations_per_update": 11,
-        "lr_skill": 0.06651198263606564,
-        "lr_alpha": 0.03724149965438307,
-        "mov_sigma_scale": 0.07985065259046613,
-        "huber_delta": 4.237930305279724,
-        "center_mode": "mean",
-        "robust_mov": true,
-        "mov_min_reliable": 2.545410097356341,
-        "mov_reliability_exp": 1.5474582660430567,
-        "roster_balance_weight": 1.5985117108752593,
-        "adaptive_reg": false,
         "display_center": 1000.0,
-        "display_scale": 100.0
+        "display_spread": 200.0,
+        "lambda_reg": 0.11326723721696955,
+        "nu": 0.0011158204328072137,
+        "sigma": 2.2587356290153044
       },
       "mode_metrics": {
-        "nll": 0.6634545837250703,
-        "brier": 0.23425274973430787,
-        "accuracy": 0.586890243902439,
-        "games_scored": 656
+        "nll": 0.6342428518049888,
+        "brier": 0.2230798893439155,
+        "accuracy": 0.62555720653789,
+        "games_scored": 673
       },
-      "trial": 0,
-      "trials": 3,
+      "trial": 144,
+      "trials": 200,
       "cross_mode_metrics": {
-        "mean_nll": 0.6874287681307532,
-        "mean_brier": 0.24839427560045713,
-        "mean_accuracy": 0.5417410485093181,
+        "mean_nll": 0.6736618243157589,
+        "mean_brier": 0.2411872862502572,
+        "mean_accuracy": 0.5423652192395093,
         "teams_scored": 139
       }
     }
   },
   "new_team": {
-    "elo": {
-      "best_value": 0.6759150815557995,
-      "objective_metric": "mean_nll",
-      "params": {
-        "initial_elo": 1000.0,
-        "K": 290.2320940472648,
-        "tournament_multiplier": 1.7537959955459217
-      },
-      "mode_metrics": {
-        "mean_nll": 0.6759150815557995,
-        "mean_brier": 0.24187672800986107,
-        "mean_accuracy": 0.539477433248732,
-        "teams_scored": 139
-      },
-      "trial": 1,
-      "trials": 3,
-      "cross_mode_metrics": {
-        "nll": 0.6467394422400906,
-        "brier": 0.22811238284237456,
-        "accuracy": 0.6082317073170732,
-        "games_scored": 656
-      }
-    },
-    "trueskill": {
-      "best_value": 0.692351959298372,
-      "objective_metric": "mean_nll",
-      "params": {
-        "mu": 1000.0,
-        "sigma": 66.89123585985439,
-        "beta": 1449.4093133932188,
-        "tau": 7.854918616704017,
-        "draw_probability": 0.22556129521319934
-      },
-      "mode_metrics": {
-        "mean_nll": 0.692351959298372,
-        "mean_brier": 0.24960580278480266,
-        "mean_accuracy": 0.5061738852253809,
-        "teams_scored": 139
-      },
-      "trial": 1,
-      "trials": 3,
-      "cross_mode_metrics": {
-        "nll": 0.6942348772889658,
-        "brier": 0.25053714413990896,
-        "accuracy": 0.5579268292682927,
-        "games_scored": 656
-      }
-    },
-    "trueskill_mov": {
-      "best_value": 0.6905730222073503,
-      "objective_metric": "mean_nll",
-      "params": {
-        "mu": 1000.0,
-        "sigma": 754.9018949387372,
-        "beta": 1775.1736636501566,
-        "tau": 8.585210059816044,
-        "draw_probability": 0.2550194115218558
-      },
-      "mode_metrics": {
-        "mean_nll": 0.6905730222073503,
-        "mean_brier": 0.248704212650498,
-        "mean_accuracy": 0.5382976693465145,
-        "teams_scored": 139
-      },
-      "trial": 1,
-      "trials": 3,
-      "cross_mode_metrics": {
-        "nll": 0.6475899940232694,
-        "brier": 0.2287936707021117,
-        "accuracy": 0.6067073170731707,
-        "games_scored": 656
-      }
-    },
     "bt_mov": {
-      "best_value": 0.6950533784705154,
+      "best_value": 0.6708522433547084,
       "objective_metric": "mean_nll",
       "params": {
-        "initial_skill": 0.0,
-        "alpha": 1.1338706652466186,
-        "sigma_mov": 11.670276822826139,
-        "lambda_mov": 0.0498652857767813,
-        "lambda_skill": 0.0015833162002099536,
-        "iterations_per_update": 21,
-        "lr_skill": 0.03745950051921455,
-        "lr_alpha": 0.03638560346762064,
-        "mov_sigma_scale": 0.0893707162424904,
-        "huber_delta": 3.610964228873675,
-        "center_mode": "mean",
-        "robust_mov": true,
-        "mov_min_reliable": 3.7133194490221713,
-        "mov_reliability_exp": 0.8840741960072378,
-        "roster_balance_weight": 1.6911520623521223,
-        "adaptive_reg": true,
         "display_center": 1000.0,
-        "display_scale": 100.0
+        "display_spread": 200.0,
+        "lambda_reg": 0.05966588582361511,
+        "nu": 0.0010194216005519688,
+        "sigma": 9.292413033124804
       },
       "mode_metrics": {
-        "mean_nll": 0.6950533784705154,
-        "mean_brier": 0.2513657761369551,
-        "mean_accuracy": 0.5418669218366303,
+        "mean_nll": 0.6708522433547084,
+        "mean_brier": 0.239776829730976,
+        "mean_accuracy": 0.5493720014261476,
         "teams_scored": 139
       },
-      "trial": 1,
-      "trials": 3,
+      "trial": 131,
+      "trials": 200,
       "cross_mode_metrics": {
-        "nll": 0.6711220796455386,
-        "brier": 0.2366113756118948,
-        "accuracy": 0.5899390243902439,
-        "games_scored": 656
+        "nll": 0.6381588991231322,
+        "brier": 0.22443498045949545,
+        "accuracy": 0.6210995542347697,
+        "games_scored": 673
       }
     }
   }

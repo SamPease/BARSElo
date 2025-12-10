@@ -86,17 +86,12 @@
                 "lambda_reg": {
                     "type": "log",
                     "low": 0.001,
-                    "high": 1.0
-                },
-                "nu": {
-                    "type": "log",
-                    "low": 0.001,
-                    "high": 0.5
+                    "high": 10.0
                 },
                 "sigma": {
                     "type": "float",
                     "low": 1.0,
-                    "high": 10.0
+                    "high": 50.0
                 }
             },
             "trials": 200
