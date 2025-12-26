@@ -37,9 +37,13 @@
         td a:hover { text-decoration: underline; }
         .back-link { display: inline-block; margin-bottom: 15px; color: #0066cc; text-decoration: none; }
         .back-link:hover { text-decoration: underline; }
-        .detail-container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .detail-container { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
         .detail-info { flex: 1; min-width: 300px; }
         .detail-chart { flex: 2; min-width: 600px; }
+        .player-summary { margin-bottom: 16px; }
+        .player-chart-block { margin: 12px 0 8px 0; }
+        .team-chart-block { margin: 12px 0 8px 0; }
+        .player-teams-block { margin-top: 16px; }
         .roster-table { width: 100%; margin-top: 10px; }
         .roster-table th, .roster-table td { padding: 8px; font-size: 13px; }
         .loading { text-align: center; padding: 40px; color: #666; }
@@ -48,6 +52,13 @@
         .info-text { color: #666; font-size: 13px; margin: 8px 0; }
         .changes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
         @media (max-width: 1000px) { .changes-grid { grid-template-columns: 1fr; } }
+        /* Wider, no-wrap Win % column in Changes tab */
+        .win-pct-col { white-space: nowrap; min-width: 240px; }
+        /* Win % wideners for roster/teams tables */
+        .roster-win-pct { white-space: nowrap; min-width: 240px; }
+        /* Compact changes tables to avoid overflow */
+        .changes-table { font-size: 13px; }
+        .changes-table th, .changes-table td { padding: 8px 10px; }
     </style>
 </head>
 <body>
@@ -72,6 +83,17 @@
 let DATA = null;
 let currentTab = 'players';
 let currentSort = { table: 'players', column: 'current_elo', direction: 'desc' };
+// Changes tab sort state
+let changesSort = {
+    players: { column: 'rank_change', direction: 'desc' },
+    teams: { column: 'win_pct', direction: 'desc' }
+};
+// Roster sort state
+let rosterSort = { column: 'current_elo', direction: 'desc' };
+let LAST_ROSTER_TEAM = null;
+let LAST_ROSTER_DATA = [];
+let LAST_CHANGES_DATA = { players: [], teams: [] };
+let TEAM_ELO_SUMMARY = {};
 const INITIAL_ELO = 1000;
 
 // Load data
@@ -80,6 +102,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const response = await fetch('data/elo_data.json', { cache: 'no-store' });
         DATA = await response.json();
         console.log('✓ Data loaded:', DATA.metadata);
+        TEAM_ELO_SUMMARY = computeTeamEloSummary();
         handleRoute();
         window.addEventListener('hashchange', handleRoute);
     } catch (error) {
@@ -213,20 +236,26 @@ function showPlayersTab() {
 function showTeamsTab() {
     const teams = Object.entries(DATA.teams).map(([name, stats]) => ({
         name, ...stats,
-        win_pct: stats.games > 0 ? (stats.wins + 0.5 * stats.draws) / stats.games : null
+        win_pct: stats.games > 0 ? (stats.wins + 0.5 * stats.draws) / stats.games : null,
+        final_elo: TEAM_ELO_SUMMARY[name]?.final_elo ?? null,
+        current_elo_avg: TEAM_ELO_SUMMARY[name]?.current_elo ?? null,
+        starting_elo: TEAM_ELO_SUMMARY[name]?.starting_elo ?? null
     }));
     
-    if (currentSort.table !== 'teams') currentSort = { table: 'teams', column: 'current_elo', direction: 'desc' };
+    // Default sort by Final ELO
+    if (currentSort.table !== 'teams') currentSort = { table: 'teams', column: 'final_elo', direction: 'desc' };
     sortData(teams, currentSort.column, currentSort.direction);
     
     let html = `<p>Click a team name to view details.</p>
         <input type="text" class="filter-input" placeholder="Filter teams..." onkeyup="filterTable('teamTable', 0)">
         <table id="teamTable"><thead><tr>
             <th onclick="sortTeamsTable('name')">Team</th>
-            <th onclick="sortTeamsTable('last_game')">Last Played</th>
-            <th onclick="sortTeamsTable('current_elo')">ELO</th>
-            <th onclick="sortTeamsTable('win_pct')">Win %</th>
+            <th onclick="sortTeamsTable('final_elo')">Final ELO</th>
+            <th onclick="sortTeamsTable('current_elo_avg')">Current ELO</th>
+            <th onclick="sortTeamsTable('starting_elo')">Starting ELO</th>
+            <th class="win-pct-col" onclick="sortTeamsTable('win_pct')">Win %</th>
             <th onclick="sortTeamsTable('games')">Games</th>
+            <th onclick="sortTeamsTable('last_game')">Last Played</th>
         </tr></thead><tbody>`;
     
     teams.forEach(t => {
@@ -234,10 +263,12 @@ function showTeamsTab() {
         const lp = t.last_game ? new Date(t.last_game).toLocaleDateString() : 'Never';
         html += `<tr>
             <td><a href="#/team/${encodeURIComponent(t.name)}">${escapeHtml(t.name)}</a></td>
-            <td>${lp}</td>
-            <td>${t.current_elo?.toFixed(2) ?? 'N/A'}</td>
-            <td>${wp}</td>
+            <td>${t.final_elo?.toFixed(2) ?? 'N/A'}</td>
+            <td>${t.current_elo_avg?.toFixed(2) ?? 'N/A'}</td>
+            <td>${t.starting_elo?.toFixed(2) ?? 'N/A'}</td>
+            <td class="win-pct-col">${wp}</td>
             <td>${t.games}</td>
+            <td>${lp}</td>
         </tr>`;
     });
     
@@ -268,6 +299,7 @@ function updateChangesData() {
     if (!datePicker) return;
     const selectedDate = new Date(datePicker.value + 'T23:59:59');
     const { players, teams } = computeChanges(selectedDate);
+    LAST_CHANGES_DATA = { players: [...players], teams: [...teams] };
     renderChangesTable('playersChangesContainer', players, true);
     renderChangesTable('teamsChangesContainer', teams, false);
 }
@@ -368,15 +400,15 @@ function computeChanges(targetDate) {
         });
         changes.forEach(item => {
             if (item.rank_before && item.rank_after) {
-                item.rank_change = item.rank_after - item.rank_before;
+                // Positive means rank up (better rank number decreases)
+                item.rank_change = item.rank_before - item.rank_after;
             }
         });
     }
     
     addRanks(playerChanges);
     addRanks(teamChanges);
-    playerChanges.sort((a, b) => (a.rank_change || 0) - (b.rank_change || 0));
-    teamChanges.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    // Defaults handled in render based on changesSort
     
     return { players: playerChanges, teams: teamChanges };
 }
@@ -386,30 +418,74 @@ function renderChangesTable(containerId, data, isPlayers) {
         document.getElementById(containerId).innerHTML = '<p class="info-text">No changes on selected date.</p>';
         return;
     }
-    
-    let html = '<table><thead><tr>';
-    html += `<th>${isPlayers ? 'Player' : 'Team'}</th><th>Before</th><th>After</th><th>Delta</th>`;
-    html += '<th>Rank Before</th><th>Rank After</th><th>Rank Change</th>';
-    if (!isPlayers) html += '<th>Win %</th>';
+    // Apply current sort
+    const sortCfg = isPlayers ? changesSort.players : changesSort.teams;
+    sortData(data, sortCfg.column, sortCfg.direction);
+
+    // Build header with sort indicators and click handlers
+    const headerClasses = (col) => {
+        const isSorted = sortCfg.column === col;
+        return isSorted ? (sortCfg.direction === 'asc' ? 'sorted-asc' : 'sorted-desc') : '';
+    };
+    const sortHandler = (col) => isPlayers ? `sortPlayersChangesTable('${col}')` : `sortTeamsChangesTable('${col}')`;
+
+    let html = '<table class="changes-table"><thead><tr>';
+    html += `<th class="${headerClasses('name')}" onclick="${sortHandler('name')}">${isPlayers ? 'Player' : 'Team'}</th>`;
+    html += `<th class="${headerClasses('before')}" onclick="${sortHandler('before')}">Before</th>`;
+    html += `<th class="${headerClasses('after')}" onclick="${sortHandler('after')}">After</th>`;
+    html += `<th class="${headerClasses('delta')}" onclick="${sortHandler('delta')}">Delta</th>`;
+    html += `<th class="${headerClasses('rank_before')}" onclick="${sortHandler('rank_before')}">Rank Before</th>`;
+    html += `<th class="${headerClasses('rank_after')}" onclick="${sortHandler('rank_after')}">Rank After</th>`;
+    html += `<th class="${headerClasses('rank_change')}" onclick="${sortHandler('rank_change')}">Rank Change</th>`;
+    if (!isPlayers) html += `<th class="win-pct-col ${headerClasses('win_pct')}" onclick="${sortHandler('win_pct')}">Win %</th>`;
     html += '</tr></thead><tbody>';
     
     data.forEach(item => {
         const link = isPlayers 
             ? `<a href="#/player/${encodeURIComponent(item.name)}">${escapeHtml(item.name)}</a>`
             : `<a href="#/team/${encodeURIComponent(item.name)}">${escapeHtml(item.name)}</a>`;
-        const rc = item.rank_change ? (item.rank_change < 0 ? `↑${Math.abs(item.rank_change)}` : item.rank_change > 0 ? `↓${item.rank_change}` : '0') : '';
+        const rcVal = (item.rank_change !== null && item.rank_change !== undefined)
+            ? (item.rank_change > 0 ? `+${item.rank_change}` : `${item.rank_change}`)
+            : '';
+        const rcArrow = (item.rank_change !== null && item.rank_change !== undefined)
+            ? (item.rank_change > 0 ? '↑' : item.rank_change < 0 ? '↓' : '')
+            : '';
+        const rcStyle = item.rank_change > 0 ? 'color: green;' : item.rank_change < 0 ? 'color: red;' : '';
         const ds = item.delta > 0 ? 'color: green;' : item.delta < 0 ? 'color: red;' : '';
         html += `<tr><td>${link}</td><td>${item.before?.toFixed(2) ?? 'N/A'}</td><td>${item.after?.toFixed(2) ?? 'N/A'}</td>`;
         html += `<td style="${ds}">${item.delta > 0 ? '+' : ''}${item.delta?.toFixed(2) ?? 'N/A'}</td>`;
-        html += `<td>${item.rank_before || 'N/A'}</td><td>${item.rank_after || 'N/A'}</td><td>${rc}</td>`;
+        html += `<td>${item.rank_before || 'N/A'}</td><td>${item.rank_after || 'N/A'}</td><td style="${rcStyle}">${rcVal} ${rcArrow}</td>`;
         if (!isPlayers) {
             const wp = item.win_pct !== null && item.win_pct !== undefined ? `${(item.win_pct*100).toFixed(1)}% (W:${item.wins} L:${item.losses} T:${item.draws})` : '';
-            html += `<td>${wp}</td>`;
+            html += `<td class="win-pct-col">${wp}</td>`;
         }
         html += '</tr>';
     });
     html += '</tbody></table>';
     document.getElementById(containerId).innerHTML = html;
+}
+
+function sortPlayersChangesTable(column) {
+    const cfg = changesSort.players;
+    if (cfg.column === column) {
+        cfg.direction = cfg.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        cfg.column = column;
+        cfg.direction = column === 'name' ? 'asc' : 'desc';
+    }
+    renderChangesTable('playersChangesContainer', LAST_CHANGES_DATA.players, true);
+}
+
+function sortTeamsChangesTable(column) {
+    const cfg = changesSort.teams;
+    if (cfg.column === column) {
+        cfg.direction = cfg.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        cfg.column = column;
+        // Default asc for name, desc for numeric
+        cfg.direction = column === 'name' ? 'asc' : 'desc';
+    }
+    renderChangesTable('teamsChangesContainer', LAST_CHANGES_DATA.teams, false);
 }
 
 // Player page
@@ -425,31 +501,58 @@ function showPlayerPage(playerName) {
     const percentile = rank ? (100 * (allElos.length - rank + 1) / allElos.length).toFixed(1) : null;
     const winPct = player.games > 0 ? (100 * (player.wins + 0.5 * player.draws) / player.games).toFixed(1) : 'N/A';
     
-    let teamsTable = '<table class="roster-table"><thead><tr><th>Team</th><th>Last Played</th><th>Team ELO</th><th>Win %</th></tr></thead><tbody>';
-    player.teams.forEach(teamName => {
+    // Teams the player has been on, default sorted by last played (desc)
+    const playerTeamsData = player.teams.map(teamName => {
         const team = DATA.teams[teamName];
-        if (team) {
-            const twp = team.games > 0 ? `${(100*(team.wins+0.5*team.draws)/team.games).toFixed(1)}% (W:${team.wins} L:${team.losses} T:${team.draws})` : 'N/A';
-            const lp = team.last_game ? new Date(team.last_game).toLocaleDateString() : 'Never';
-            teamsTable += `<tr><td><a href="#/team/${encodeURIComponent(teamName)}">${escapeHtml(teamName)}</a></td>`;
-            teamsTable += `<td>${lp}</td><td>${team.current_elo?.toFixed(2) ?? 'N/A'}</td><td>${twp}</td></tr>`;
-        }
+        const summary = TEAM_ELO_SUMMARY[teamName] || {};
+        if (!team) return null;
+        return {
+            name: teamName,
+            last_game: team.last_game,
+            final_elo: summary.final_elo ?? null,
+            current_elo: summary.current_elo ?? team.current_elo ?? null,
+            starting_elo: summary.starting_elo ?? null,
+            win_pct: team.games > 0 ? (team.wins + 0.5 * team.draws) / team.games : null,
+            wins: team.wins,
+            losses: team.losses,
+            draws: team.draws,
+            games: team.games
+        };
+    }).filter(Boolean);
+
+    playerTeamsData.sort((a, b) => {
+        const aTime = a.last_game ? new Date(a.last_game).getTime() : -Infinity;
+        const bTime = b.last_game ? new Date(b.last_game).getTime() : -Infinity;
+        return bTime - aTime;
+    });
+
+    let teamsTable = '<table class="roster-table"><thead><tr><th>Team</th><th>Final ELO</th><th>Current ELO</th><th>Starting ELO</th><th class="roster-win-pct">Win %</th><th>Games</th><th>Last Played</th></tr></thead><tbody>';
+    playerTeamsData.forEach(t => {
+        const lp = t.last_game ? new Date(t.last_game).toLocaleDateString() : 'Never';
+        const wp = t.win_pct !== null ? `${(t.win_pct*100).toFixed(1)}% (W:${t.wins} L:${t.losses} T:${t.draws})` : 'N/A';
+        teamsTable += `<tr>`;
+        teamsTable += `<td><a href="#/team/${encodeURIComponent(t.name)}">${escapeHtml(t.name)}</a></td>`;
+        teamsTable += `<td>${t.final_elo?.toFixed(2) ?? 'N/A'}</td>`;
+        teamsTable += `<td>${t.current_elo?.toFixed(2) ?? 'N/A'}</td>`;
+        teamsTable += `<td>${t.starting_elo?.toFixed(2) ?? 'N/A'}</td>`;
+        teamsTable += `<td class="roster-win-pct">${wp}</td>`;
+        teamsTable += `<td>${t.games}</td>`;
+        teamsTable += `<td>${lp}</td>`;
+        teamsTable += `</tr>`;
     });
     teamsTable += '</tbody></table>';
     
     let html = `<a href="#/" class="back-link">← Back to Players</a>
-        <div class="detail-container">
-            <div class="detail-info">
-                <h2>${escapeHtml(playerName)}</h2>
-                <p><strong>ELO:</strong> ${player.current_elo?.toFixed(2) ?? 'N/A'}${rank ? ` (Rank #${rank}, ${percentile}th percentile)` : ''}</p>
-                <p><strong>Peak ELO:</strong> ${player.peak_elo?.toFixed(2) ?? 'N/A'}</p>
-                <p><strong>Min ELO:</strong> ${player.min_elo?.toFixed(2) ?? 'N/A'}</p>
-                <p><strong>Record:</strong> ${player.wins}-${player.losses}-${player.draws} (${winPct}%)</p>
-                <p><strong>Games:</strong> ${player.games}</p>
-                <h3>Teams</h3>${teamsTable}
-            </div>
-            <div class="detail-chart"><div id="playerChart"></div></div>
-        </div>`;
+        <div class="player-summary">
+            <h2>${escapeHtml(playerName)}</h2>
+            <p><strong>ELO:</strong> ${player.current_elo?.toFixed(2) ?? 'N/A'}${rank ? ` (Rank #${rank}, ${percentile}th percentile)` : ''}</p>
+            <p><strong>Peak ELO:</strong> ${player.peak_elo?.toFixed(2) ?? 'N/A'}</p>
+            <p><strong>Min ELO:</strong> ${player.min_elo?.toFixed(2) ?? 'N/A'}</p>
+            <p><strong>Record:</strong> ${player.wins}-${player.losses}-${player.draws} (${winPct}%)</p>
+            <p><strong>Games:</strong> ${player.games}</p>
+        </div>
+        <div class="player-chart-block"><div id="playerChart"></div></div>
+        <div class="player-teams-block"><h3>Teams</h3>${teamsTable}</div>`;
     
     document.getElementById('pageContent').innerHTML = html;
     renderPlayerChart(playerName);
@@ -463,38 +566,122 @@ function showTeamPage(teamName) {
         return;
     }
     
-    const allTeamElos = Object.values(DATA.teams).map(t => t.current_elo).filter(e => e !== null).sort((a, b) => b - a);
-    const rank = team.current_elo ? allTeamElos.indexOf(team.current_elo) + 1 : null;
-    const percentile = rank ? (100 * (allTeamElos.length - rank + 1) / allTeamElos.length).toFixed(1) : null;
+    const teamElo = TEAM_ELO_SUMMARY[teamName] || {};
+    const allTeamFinalElos = Object.values(TEAM_ELO_SUMMARY).map(t => t.final_elo).filter(e => e !== null).sort((a, b) => b - a);
+    const finalRank = teamElo.final_elo !== null && teamElo.final_elo !== undefined ? allTeamFinalElos.indexOf(teamElo.final_elo) + 1 : null;
+    const finalPercentile = finalRank ? (100 * (allTeamFinalElos.length - finalRank + 1) / allTeamFinalElos.length).toFixed(1) : null;
+
+    const allTeamCurrentElos = Object.values(DATA.teams).map(t => t.current_elo).filter(e => e !== null).sort((a, b) => b - a);
+    const currentRank = team.current_elo ? allTeamCurrentElos.indexOf(team.current_elo) + 1 : null;
+    const currentPercentile = currentRank ? (100 * (allTeamCurrentElos.length - currentRank + 1) / allTeamCurrentElos.length).toFixed(1) : null;
     const winPct = team.games > 0 ? (100 * (team.wins + 0.5 * team.draws) / team.games).toFixed(1) : 'N/A';
     
-    let rosterTable = '<table class="roster-table"><thead><tr><th>Player</th><th>ELO</th><th>Rank</th><th>Percentile</th></tr></thead><tbody>';
+    let rosterTable = '<table class="roster-table"><thead><tr>';
+    
+    // Build roster data
     const allPlayerElos = Object.entries(DATA.players).map(([name, stats]) => ({ name, elo: stats.current_elo })).filter(p => p.elo !== null).sort((a, b) => b.elo - a.elo);
+    const timestamps = DATA.elo_history.timestamps.map(t => new Date(t));
+    const rosterData = [];
+    
     team.members.forEach(playerName => {
         const player = DATA.players[playerName];
-        if (player) {
-            const pRank = player.current_elo ? allPlayerElos.findIndex(p => p.name === playerName) + 1 : null;
-            const pPercentile = pRank ? (100 * (allPlayerElos.length - pRank + 1) / allPlayerElos.length).toFixed(1) : null;
-            rosterTable += `<tr><td><a href="#/player/${encodeURIComponent(playerName)}">${escapeHtml(playerName)}</a></td>`;
-            rosterTable += `<td>${player.current_elo?.toFixed(2) ?? 'N/A'}</td><td>${pRank ? `#${pRank}` : 'N/A'}</td>`;
-            rosterTable += `<td>${pPercentile ? `${pPercentile}%` : 'N/A'}</td></tr>`;
+        if (!player) return;
+        
+        const pRank = player.current_elo ? allPlayerElos.findIndex(p => p.name === playerName) + 1 : null;
+        const pPercentile = pRank ? (100 * (allPlayerElos.length - pRank + 1) / allPlayerElos.length).toFixed(1) : null;
+        
+        const playerEloHistory = DATA.elo_history.players[playerName];
+        let endingElo = null;
+        let startingElo = null;
+        
+        // Ending ELO: player's ELO at or after team's last game
+        if (team.last_game && playerEloHistory) {
+            const lastGameDate = new Date(team.last_game);
+            for (let i = 0; i < timestamps.length; i++) {
+                if (timestamps[i] >= lastGameDate) {
+                    endingElo = playerEloHistory[i];
+                    break;
+                }
+            }
         }
+        
+        // Starting ELO: player's ELO just before team's first game
+        if (team.first_game && playerEloHistory) {
+            const firstGameDate = new Date(team.first_game);
+            for (let i = timestamps.length - 1; i >= 0; i--) {
+                if (timestamps[i] < firstGameDate) {
+                    startingElo = playerEloHistory[i];
+                    break;
+                }
+            }
+        }
+        
+        // Previous games: count games where player's team was involved before team's first game
+        let prevGames = 0;
+        if (team.first_game) {
+            const firstGameDate = new Date(team.first_game);
+            const gamesBeforeFirst = DATA.games_with_scores.filter(g => new Date(g.datetime) < firstGameDate);
+            gamesBeforeFirst.forEach(g => {
+                if ((g.team1 && player.teams.includes(g.team1)) || (g.team2 && player.teams.includes(g.team2))) {
+                    prevGames++;
+                }
+            });
+        }
+        
+        rosterData.push({
+            name: playerName,
+            current_elo: player.current_elo ?? null,
+            rank: pRank,
+            percentile: pPercentile,
+            ending_elo: endingElo,
+            starting_elo: startingElo,
+            prev_games: prevGames
+        });
+    });
+    
+    // Sort and store roster data
+    LAST_ROSTER_DATA = rosterData;
+    LAST_ROSTER_TEAM = teamName;
+    sortData(rosterData, rosterSort.column, rosterSort.direction);
+    
+    // Build table with sortable headers
+    const rosterHeaderClasses = (col) => {
+        const isSorted = rosterSort.column === col;
+        return isSorted ? (rosterSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc') : '';
+    };
+    const rosterSortHandler = (col) => `sortRosterTable('${col}')`;
+    rosterTable += `<th class="${rosterHeaderClasses('name')}" onclick="${rosterSortHandler('name')}">Player</th>`;
+    rosterTable += `<th class="${rosterHeaderClasses('current_elo')}" onclick="${rosterSortHandler('current_elo')}">ELO</th>`;
+    rosterTable += `<th class="${rosterHeaderClasses('rank')}" onclick="${rosterSortHandler('rank')}">Rank</th>`;
+    rosterTable += `<th class="${rosterHeaderClasses('percentile')}" onclick="${rosterSortHandler('percentile')}">Percentile</th>`;
+    rosterTable += `<th class="${rosterHeaderClasses('ending_elo')}" onclick="${rosterSortHandler('ending_elo')}">Ending ELO</th>`;
+    rosterTable += `<th class="${rosterHeaderClasses('starting_elo')}" onclick="${rosterSortHandler('starting_elo')}">Starting ELO</th>`;
+    rosterTable += `<th class="${rosterHeaderClasses('prev_games')}" onclick="${rosterSortHandler('prev_games')}">Previous Games</th>`;
+    rosterTable += '</tr></thead><tbody>';
+    
+    rosterData.forEach(r => {
+        rosterTable += `<tr><td><a href="#/player/${encodeURIComponent(r.name)}">${escapeHtml(r.name)}</a></td>`;
+        rosterTable += `<td>${r.current_elo?.toFixed(2) ?? 'N/A'}</td><td>${r.rank ? `#${r.rank}` : 'N/A'}</td>`;
+        rosterTable += `<td>${r.percentile ? `${r.percentile}%` : 'N/A'}</td>`;
+        rosterTable += `<td>${r.ending_elo ? r.ending_elo.toFixed(2) : 'N/A'}</td>`;
+        rosterTable += `<td>${r.starting_elo ? r.starting_elo.toFixed(2) : 'N/A'}</td>`;
+        rosterTable += `<td>${r.prev_games}</td></tr>`;
     });
     rosterTable += '</tbody></table>';
     
     let html = `<a href="#/teams" class="back-link">← Back to Teams</a>
-        <div class="detail-container">
-            <div class="detail-info">
-                <h2>${escapeHtml(teamName)}</h2>
-                <p><strong>ELO:</strong> ${team.current_elo?.toFixed(2) ?? 'N/A'}${rank ? ` (Rank #${rank}, ${percentile}th percentile)` : ''}</p>
-                <p><strong>Record:</strong> ${team.wins}-${team.losses}-${team.draws} (${winPct}%)</p>
-                <p><strong>Games:</strong> ${team.games}</p>
-                <p><strong>First Game:</strong> ${team.first_game ? new Date(team.first_game).toLocaleDateString() : 'Never'}</p>
-                <p><strong>Last Game:</strong> ${team.last_game ? new Date(team.last_game).toLocaleDateString() : 'Never'}</p>
-                <h3>Roster</h3>${rosterTable}
-            </div>
-            <div class="detail-chart"><div id="teamChart"></div></div>
-        </div>`;
+        <div class="detail-info">
+            <h2>${escapeHtml(teamName)}</h2>
+            <p><strong>Final ELO (post last game):</strong> ${teamElo.final_elo?.toFixed(2) ?? 'N/A'}${finalRank ? ` (Rank #${finalRank}, ${finalPercentile}th percentile)` : ''}</p>
+            <p><strong>Current ELO:</strong> ${teamElo.current_elo?.toFixed(2) ?? team.current_elo?.toFixed(2) ?? 'N/A'}${currentRank ? ` (Rank #${currentRank}, ${currentPercentile}th percentile)` : ''}</p>
+            <p><strong>Starting ELO (pre first game):</strong> ${teamElo.starting_elo?.toFixed(2) ?? 'N/A'}</p>
+            <p><strong>Record:</strong> ${team.wins}-${team.losses}-${team.draws} (${winPct}%)</p>
+            <p><strong>Games:</strong> ${team.games}</p>
+            <p><strong>First Game:</strong> ${team.first_game ? new Date(team.first_game).toLocaleDateString() : 'Never'}</p>
+            <p><strong>Last Game:</strong> ${team.last_game ? new Date(team.last_game).toLocaleDateString() : 'Never'}</p>
+        </div>
+        <div class="team-chart-block"><div id="teamChart"></div></div>
+        <div class="player-teams-block"><h3>Roster</h3>${rosterTable}</div>`;
     
     document.getElementById('pageContent').innerHTML = html;
     renderTeamChart(teamName);
@@ -548,7 +735,23 @@ function renderPlayerChart(playerName) {
     });
     
     traces.push({ x: plotTimestamps, y: Array(plotTimestamps.length).fill(INITIAL_ELO), mode: 'lines', name: 'Starting ELO', line: { color: 'red', dash: 'dash', width: 1 }, hoverinfo: 'skip', showlegend: false });
-    const layout = { title: `${playerName} ELO History`, xaxis: { title: 'Date' }, yaxis: { title: 'ELO Rating' }, height: 600, hovermode: 'x unified', legend: { orientation: 'h', y: 1.1 } };
+    const layout = {
+        title: '',
+        xaxis: { title: 'Date' },
+        yaxis: { title: 'ELO Rating' },
+        height: 600,
+        hovermode: 'x unified',
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: 1.08,
+            yanchor: 'bottom',
+            bgcolor: 'rgba(255,255,255,0.9)',
+            bordercolor: '#ddd',
+            borderwidth: 1
+        },
+        margin: { t: 40, r: 20, b: 60, l: 60 }
+    };
     Plotly.newPlot('playerChart', traces, layout, { responsive: true });
 }
 
@@ -558,36 +761,82 @@ function renderTeamChart(teamName) {
     if (!team || !team.elo_history) return;
     
     const timestamps = DATA.elo_history.timestamps.map(t => new Date(t));
-    let startIdx = 0, endIdx = timestamps.length - 1;
-    
-    if (team.first_game && team.last_game) {
-        const firstGame = new Date(team.first_game);
-        const lastGame = new Date(team.last_game);
-        for (let i = 0; i < timestamps.length; i++) {
-            if (timestamps[i] < firstGame) startIdx = i;
-            // Do not cap endIdx to last game; show up to latest data point
-        }
-        startIdx = Math.max(0, startIdx);
-    }
-    
-    const plotTimestamps = timestamps.slice(startIdx, endIdx + 1);
-    const plotElos = team.elo_history.slice(startIdx, endIdx + 1);
-    const traces = [{ x: plotTimestamps, y: plotElos, mode: 'lines+markers', name: `${teamName} (Team Avg)`, line: { color: 'black', width: 3 }, marker: { size: 6 }, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+teamName+'</extra>' }];
-    
     const colors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray'];
+    const playerRanges = [];
+    let earliestStartIdx = null;
+    let latestEndIdx = null;
+
+    function findChangeRange(values) {
+        let firstChange = null;
+        let lastChange = null;
+        for (let i = 1; i < values.length; i++) {
+            if (values[i] !== values[i - 1]) {
+                if (firstChange === null) firstChange = i;
+                lastChange = i;
+            }
+        }
+        if (firstChange === null || lastChange === null) return null;
+        const startIdx = Math.max(0, firstChange - 1); // point before first game
+        const endIdx = lastChange; // through last game change
+        return { startIdx, endIdx };
+    }
+
     team.members.forEach((playerName, idx) => {
         const playerElos = DATA.elo_history.players[playerName];
-        if (!playerElos) return;
-        const playerPlotElos = playerElos.slice(startIdx, endIdx + 1);
-        traces.push({ x: plotTimestamps, y: playerPlotElos, mode: 'lines', name: playerName, line: { color: colors[idx % colors.length], width: 1.5 }, opacity: 0.7, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+playerName+'</extra>' });
+        if (!playerElos || !Array.isArray(playerElos) || playerElos.length !== timestamps.length) return;
+        const range = findChangeRange(playerElos);
+        if (!range) return;
+        const plotTimestamps = timestamps.slice(range.startIdx, range.endIdx + 1);
+        const plotElos = playerElos.slice(range.startIdx, range.endIdx + 1);
+        playerRanges.push({ plotTimestamps, plotElos, startIdx: range.startIdx, endIdx: range.endIdx, color: colors[idx % colors.length], name: playerName });
+        if (earliestStartIdx === null || range.startIdx < earliestStartIdx) earliestStartIdx = range.startIdx;
+        if (latestEndIdx === null || range.endIdx > latestEndIdx) latestEndIdx = range.endIdx;
     });
-    
-    traces.push({ x: plotTimestamps, y: Array(plotTimestamps.length).fill(INITIAL_ELO), mode: 'lines', name: 'Starting ELO', line: { color: 'red', dash: 'dash', width: 1 }, hoverinfo: 'skip', showlegend: false });
+
+    if (playerRanges.length === 0 || earliestStartIdx === null || latestEndIdx === null) return;
+
+    // Sort player ranges by current ELO (descending) so they appear in order in hover
+    playerRanges.sort((a, b) => {
+        const aElo = DATA.players[a.name]?.current_elo ?? 0;
+        const bElo = DATA.players[b.name]?.current_elo ?? 0;
+        return bElo - aElo;
+    });
+
+    // Team line spans from just before the earliest player game through the latest player game
+    const teamStartIdx = Math.max(0, earliestStartIdx);
+    const teamEndIdx = Math.min(timestamps.length - 1, latestEndIdx);
+    const teamPlotTimestamps = timestamps.slice(teamStartIdx, teamEndIdx + 1);
+    const teamPlotElos = team.elo_history.slice(teamStartIdx, teamEndIdx + 1);
+
+    const traces = [{ x: teamPlotTimestamps, y: teamPlotElos, mode: 'lines+markers', name: `${teamName} (Team Avg)`, line: { color: 'black', width: 3 }, marker: { size: 6 }, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+teamName+'</extra>' }];
+    playerRanges.forEach(r => {
+        traces.push({ x: r.plotTimestamps, y: r.plotElos, mode: 'lines', name: r.name, line: { color: r.color, width: 1.5 }, opacity: 0.7, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+r.name+'</extra>' });
+    });
+
+    traces.push({ x: teamPlotTimestamps, y: Array(teamPlotTimestamps.length).fill(INITIAL_ELO), mode: 'lines', name: 'Starting ELO', line: { color: 'red', dash: 'dash', width: 1 }, hoverinfo: 'skip', showlegend: false });
     const shapes = [];
+    shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: teamPlotTimestamps[0], x1: teamPlotTimestamps[teamPlotTimestamps.length - 1], y0: 0, y1: 1, fillcolor: 'lightblue', opacity: 0.35, line: { width: 0 }, layer: 'below' });
     if (team.first_game && team.last_game) {
-        shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: new Date(team.first_game), x1: new Date(team.last_game), y0: 0, y1: 1, fillcolor: 'lightblue', opacity: 0.2, line: { width: 0 }, layer: 'below' });
+        shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: new Date(team.first_game), x1: new Date(team.last_game), y0: 0, y1: 1, fillcolor: 'lightyellow', opacity: 0.45, line: { width: 0 }, layer: 'below' });
     }
-    const layout = { title: `${teamName} ELO History`, xaxis: { title: 'Date' }, yaxis: { title: 'Team ELO Rating' }, height: 600, hovermode: 'x unified', legend: { orientation: 'h', y: 1.1 }, shapes: shapes };
+    const layout = {
+        title: '',
+        xaxis: { title: 'Date' },
+        yaxis: { title: 'Team ELO Rating' },
+        height: 600,
+        hovermode: 'x unified',
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: 1.12,
+            yanchor: 'bottom',
+            bgcolor: 'rgba(255,255,255,0.9)',
+            bordercolor: '#ddd',
+            borderwidth: 1
+        },
+        margin: { t: 20, r: 20, b: 60, l: 60 },
+        shapes: shapes
+    };
     Plotly.newPlot('teamChart', traces, layout, { responsive: true });
 }
 
@@ -599,11 +848,75 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Compute team starting/final/current ELOs by averaging member player ELOs at timestamps:
+// - starting: last timestamp strictly before first_game (or null if none)
+// - final: first timestamp >= last_game (or latest if none found)
+// - current: latest timestamp in the history
+function computeTeamEloSummary() {
+    const summary = {};
+    if (!DATA || !DATA.elo_history || !DATA.elo_history.players || !DATA.elo_history.timestamps) return summary;
+
+    const timestamps = DATA.elo_history.timestamps.map(t => new Date(t));
+    const lastIdx = timestamps.length - 1;
+    const playersHistory = DATA.elo_history.players;
+
+    function avgAtIdx(members, idx) {
+        const vals = members
+            .map(m => playersHistory[m]?.[idx])
+            .filter(v => v !== undefined && v !== null);
+        if (vals.length === 0) return null;
+        const total = vals.reduce((a, b) => a + b, 0);
+        return total / vals.length;
+    }
+
+    Object.entries(DATA.teams).forEach(([teamName, teamData]) => {
+        const members = teamData.members || [];
+        // starting index: last timestamp before first_game
+        let startingIdx = null;
+        if (teamData.first_game) {
+            const fg = new Date(teamData.first_game);
+            for (let i = timestamps.length - 1; i >= 0; i--) {
+                if (timestamps[i] < fg) {
+                    startingIdx = i;
+                    break;
+                }
+            }
+        }
+        // final index: first timestamp on/after last_game (fallback latest)
+        let finalIdx = lastIdx;
+        if (teamData.last_game) {
+            const lg = new Date(teamData.last_game);
+            for (let i = 0; i < timestamps.length; i++) {
+                if (timestamps[i] >= lg) {
+                    finalIdx = i;
+                    break;
+                }
+            }
+        }
+        const startingElo = startingIdx !== null ? avgAtIdx(members, startingIdx) : null;
+        const finalElo = avgAtIdx(members, finalIdx);
+        const currentElo = avgAtIdx(members, lastIdx);
+        summary[teamName] = { starting_elo: startingElo, final_elo: finalElo, current_elo: currentElo, final_idx: finalIdx, starting_idx: startingIdx };
+    });
+
+    return summary;
+}
+
 function sortData(arr, column, direction) {
+    const dateColumns = new Set(['last_played', 'last_game']);
     arr.sort((a, b) => {
         let aVal = a[column], bVal = b[column];
+        // Handle nulls: push null/undefined to bottom
         if (aVal === null || aVal === undefined) return 1;
         if (bVal === null || bVal === undefined) return -1;
+        // Compare dates if applicable
+        if (dateColumns.has(column)) {
+            const aTime = new Date(aVal).getTime();
+            const bTime = new Date(bVal).getTime();
+            const cmpDate = aTime < bTime ? -1 : aTime > bTime ? 1 : 0;
+            return direction === 'asc' ? cmpDate : -cmpDate;
+        }
+        // Normalize strings for case-insensitive compare
         if (typeof aVal === 'string') { aVal = aVal.toLowerCase(); bVal = bVal.toLowerCase(); }
         const cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
         return direction === 'asc' ? cmp : -cmp;
@@ -631,7 +944,23 @@ function sortTeamsTable(column) {
 function updateSortIndicators(tableId, column, direction) {
     const table = document.getElementById(tableId);
     if (!table) return;
-    const columnMap = { 'name': 0, 'current_elo': 1, 'peak_elo': 2, 'min_elo': 3, 'win_pct': 4, 'games': 5, 'last_played': 6, 'last_game': 1 };
+    const columnMap = {
+        // players table
+        'name': 0,
+        'current_elo': 1,
+        'peak_elo': 2,
+        'min_elo': 3,
+        'win_pct': 4,
+        'games': 5,
+        'last_played': 6,
+        // teams table (ordered as rendered)
+        'final_elo': 1,
+        'current_elo_avg': 2,
+        'starting_elo': 3,
+        'win_pct': 4,
+        'games': 5,
+        'last_game': 6
+    };
     const headers = table.querySelectorAll('th');
     headers.forEach(th => th.classList.remove('sorted-asc', 'sorted-desc'));
     const headerIdx = columnMap[column];
@@ -653,6 +982,18 @@ function filterTable(tableId, columnIndex) {
             const text = cell.textContent || cell.innerText;
             rows[i].style.display = text.toLowerCase().indexOf(filter) > -1 ? '' : 'none';
         }
+    }
+}
+
+function sortRosterTable(column) {
+    if (rosterSort.column === column) {
+        rosterSort.direction = rosterSort.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        rosterSort.column = column;
+        rosterSort.direction = column === 'name' ? 'asc' : 'desc';
+    }
+    if (LAST_ROSTER_TEAM) {
+        showTeamPage(LAST_ROSTER_TEAM);
     }
 }
     </script>
