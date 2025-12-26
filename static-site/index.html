@@ -984,18 +984,6 @@ function filterTable(tableId, columnIndex) {
         }
     }
 }
-
-function sortRosterTable(column) {
-    if (rosterSort.column === column) {
-        rosterSort.direction = rosterSort.direction === 'asc' ? 'desc' : 'asc';
-    } else {
-        rosterSort.column = column;
-        rosterSort.direction = column === 'name' ? 'asc' : 'desc';
-    }
-    if (LAST_ROSTER_TEAM) {
-        showTeamPage(LAST_ROSTER_TEAM);
-    }
-}
     </script>
 </body>
 </html>
