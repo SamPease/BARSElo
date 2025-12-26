@@ -83,16 +83,8 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
     history_map = OrderedDict()
     last_processed_time = None
 
-    # Check if there are multiple games at the same timestamp
-    # If so, we cannot safely resume because the CSV only stores one state per timestamp
-    game_times = [row[0] for row in games if len(row) > 0]
-    time_counts = {}
-    for t in game_times:
-        time_counts[t] = time_counts.get(t, 0) + 1
-    has_duplicate_times = any(count > 1 for count in time_counts.values())
-
     # Attempt to resume from existing state unless force_recompute is set
-    if not force_recompute and os.path.exists(output_file) and not has_duplicate_times:
+    if not force_recompute and os.path.exists(output_file):
         print(f'Found existing results at {output_file}')
         if model.load_state(output_file, all_players):
             print('Successfully loaded previous state. Resuming from last game...')
@@ -116,8 +108,6 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
         else:
             print('Could not resume (model does not support resuming or file incompatible).')
             print('Starting fresh computation...')
-    elif has_duplicate_times:
-        print('Multiple games detected at same timestamp(s). Forcing full recompute...')
     elif force_recompute:
         print('Force recompute enabled. Starting fresh computation...')
     else:
@@ -154,14 +144,11 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
         # Only skip if the timestamp matches exactly and we're resuming from a known state
         if last_processed_time:
             # When resuming, skip all games at or before the last processed timestamp
-            try:
-                game_dt = datetime.strptime(time, '%m/%d/%Y %H:%M:%S')
-                last_dt = datetime.strptime(last_processed_time, '%m/%d/%Y %H:%M:%S')
-                if game_dt <= last_dt:
-                    continue
-            except Exception:
-                # If we can't parse timestamps, err on the side of reprocessing
-                pass
+            # Use parse_time_maybe to handle various timestamp formats flexibly
+            game_dt = parse_time_maybe(time)
+            last_dt = parse_time_maybe(last_processed_time)
+            if game_dt and last_dt and game_dt <= last_dt:
+                continue
 
         team1 = team_to_players.get(t1, [])
         team2 = team_to_players.get(t2, [])
@@ -192,6 +179,19 @@ def main():
 
     team_to_players = load_teams(TEAMS)
     games = load_games(GAMES)
+    
+    # Sort games by timestamp to ensure chronological processing
+    # This is critical for resume functionality to work correctly
+    games_with_parsed_time = []
+    for row in games:
+        time_str = row[0] if len(row) > 0 else ''
+        parsed_time = parse_time_maybe(time_str)
+        games_with_parsed_time.append((parsed_time, row))
+    
+    # Sort by parsed time (None values go to the end)
+    games_with_parsed_time.sort(key=lambda x: (x[0] is None, x[0] if x[0] is not None else datetime.max))
+    games = [row for _, row in games_with_parsed_time]
+    
     all_players = get_all_players(team_to_players)
 
     output_file = os.path.join(VIZ_DIR, f"{model_name}_results.csv")

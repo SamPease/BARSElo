@@ -1,3 +1,4 @@
-data/
+data/games
+data/teams
 *.DS_Store
 .DS_Store

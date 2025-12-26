@@ -66,7 +66,7 @@
         <div id="pageContent" class="loading">Loading data...</div>
     </div>
     
-    <script src="data/elo_data.json"></script>
+    <!-- Data is fetched dynamically below; cache-busted to avoid stale loads -->
     <script>
 // Global state
 let DATA = null;
@@ -77,7 +77,7 @@ const INITIAL_ELO = 1000;
 // Load data
 window.addEventListener('DOMContentLoaded', async () => {
     try {
-        const response = await fetch('data/elo_data.json');
+        const response = await fetch('data/elo_data.json', { cache: 'no-store' });
         DATA = await response.json();
         console.log('✓ Data loaded:', DATA.metadata);
         handleRoute();
@@ -517,7 +517,7 @@ function renderPlayerChart(playerName) {
             const lastGame = new Date(Math.max(...gameDates));
             for (let i = 0; i < timestamps.length; i++) {
                 if (timestamps[i] < firstGame) startIdx = i;
-                if (timestamps[i] <= lastGame) endIdx = i;
+                // Do not cap endIdx to last game; show up to latest data point
             }
             startIdx = Math.max(0, startIdx);
         }
@@ -565,7 +565,7 @@ function renderTeamChart(teamName) {
         const lastGame = new Date(team.last_game);
         for (let i = 0; i < timestamps.length; i++) {
             if (timestamps[i] < firstGame) startIdx = i;
-            if (timestamps[i] <= lastGame) endIdx = i;
+            // Do not cap endIdx to last game; show up to latest data point
         }
         startIdx = Math.max(0, startIdx);
     }

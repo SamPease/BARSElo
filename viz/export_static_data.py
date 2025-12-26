@@ -21,9 +21,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Import the existing loader functions from dash_app_elo
 import pandas as pd
 import numpy as np
+from data.data_loader import parse_time_maybe
 
 # Constants
-ELO_RESULTS = 'viz/bt_mov_time_decay_results.csv'
+ELO_RESULTS = 'viz/bt_mov_results.csv'
 TEAMS_FILE = 'data/Sports Elo - Teams.csv'
 GAMES_FILE = 'data/Sports Elo - Games.csv'
 INITIAL_ELO = 1000
@@ -36,10 +37,16 @@ def load_and_export():
     
     # Load ELO results
     print("Loading ELO results...")
-    df = pd.read_csv(ELO_RESULTS, parse_dates=['Time'])
+    df = pd.read_csv(ELO_RESULTS)
+    # Ensure there is a 'Time' column and parse it robustly
     if 'Time' not in df.columns:
         df.rename(columns={df.columns[0]: 'Time'}, inplace=True)
-        df['Time'] = pd.to_datetime(df['Time'])
+    # Use our helper to parse common timestamp formats
+    df['Time'] = df['Time'].apply(lambda x: parse_time_maybe(x) if isinstance(x, str) else x)
+    # Fallback: try pandas parsing for anything still unparsed
+    df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
+    # Drop rows where time couldn't be parsed
+    df = df[df['Time'].notna()].sort_values('Time')
     
     players = [c for c in df.columns if c != 'Time']
     elo_df = df.set_index('Time')
@@ -87,15 +94,10 @@ def load_and_export():
             t2 = row[3].strip() if len(row) > 3 else ''
             s2 = row[4].strip() if len(row) > 4 else None
             
-            # Parse time
-            dt = None
-            try:
-                dt = datetime.strptime(time_str, '%m/%d/%Y %H:%M:%S')
-            except Exception:
-                try:
-                    dt = datetime.strptime(time_str, '%m/%d/%Y')
-                except Exception:
-                    continue
+            # Parse time using shared helper
+            dt = parse_time_maybe(time_str)
+            if dt is None:
+                continue
             
             if dt:
                 games.append({
