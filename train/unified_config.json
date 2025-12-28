@@ -133,6 +133,33 @@
                 }
             },
             "trials": 100
+        },
+        "bt_vet": {
+            "defaults": {
+                "sigma_0": 4.012553111926419,
+                "beta": 0.7400931984266068,
+                "sigma": 8.765480596820257,
+                "display_center": 1000.0,
+                "display_spread": 200.0
+            },
+            "search": {
+                "sigma_0": {
+                    "type": "float",
+                    "low": 0.1,
+                    "high": 50.0
+                },
+                "beta": {
+                    "type": "log",
+                    "low": 0.001,
+                    "high": 2.0
+                },
+                "sigma": {
+                    "type": "log",
+                    "low": 1.0,
+                    "high": 20.0
+                }
+            },
+            "trials": 200
         }
     },
     "metrics": [

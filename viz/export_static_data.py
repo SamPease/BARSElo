@@ -24,7 +24,7 @@ import numpy as np
 from data.data_loader import parse_time_maybe
 
 # Constants
-ELO_RESULTS = 'viz/elo_results.csv'
+ELO_RESULTS = 'viz/bt_vet_results.csv'
 TEAMS_FILE = 'data/Sports Elo - Teams.csv'
 GAMES_FILE = 'data/Sports Elo - Games.csv'
 INITIAL_ELO = 1000
@@ -93,6 +93,10 @@ def load_and_export():
             s1 = row[2].strip() if len(row) > 2 else None
             t2 = row[3].strip() if len(row) > 3 else ''
             s2 = row[4].strip() if len(row) > 4 else None
+            outcome_only = row[5].strip() if len(row) > 5 else ''
+            tournament_flag = row[6].strip() if len(row) > 6 else ''
+            is_outcome_only = outcome_only == '1'
+            is_tournament = tournament_flag == '1'
             
             # Parse time using shared helper
             dt = parse_time_maybe(time_str)
@@ -103,7 +107,9 @@ def load_and_export():
                 games.append({
                     'datetime': dt.isoformat(),
                     'team1': t1,
-                    'team2': t2
+                    'team2': t2,
+                    'outcome_only': is_outcome_only,
+                    'tournament': is_tournament
                 })
                 try:
                     s1i = int(s1) if s1 not in (None, '') else None
@@ -114,7 +120,9 @@ def load_and_export():
                             'team1': t1,
                             'score1': s1i,
                             'team2': t2,
-                            'score2': s2i
+                            'score2': s2i,
+                            'outcome_only': is_outcome_only,
+                            'tournament': is_tournament
                         })
                 except Exception:
                     pass

@@ -28,9 +28,10 @@ from models.trueskill import TrueSkillModel
 from models.trueskill_mov import TrueSkillMovModel
 from models.bt_mov import BTMOVModel
 from models.bt_mov_time_decay import BTMOVTimeDecayModel
+from models.bt_vet import BTVetModel
 
 # Default model name (can be changed)
-DEFAULT_MODEL = 'elo'  # 'elo' | 'trueskill' | 'trueskill_mov'
+DEFAULT_MODEL = 'elo'  # 'elo' | 'trueskill' | 'trueskill_mov' | 'bt_vet'
 
 TEAMS = os.path.join('data', 'Sports Elo - Teams.csv')
 GAMES = os.path.join('data', 'Sports Elo - Games.csv')
@@ -74,6 +75,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
         'trueskill_mov': TrueSkillMovModel,
         'bt_mov': BTMOVModel,
         'bt_mov_time_decay': BTMOVTimeDecayModel,
+        'bt_vet': BTVetModel,
     }
     ModelClass = model_classes.get(model_name)
     if ModelClass is None:
@@ -169,12 +171,12 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov, bt_mov_time_decay')
+    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov, bt_mov_time_decay, bt_vet')
     parser.add_argument('--force', '-f', action='store_true', help='Force recompute from scratch, ignoring existing results')
     args = parser.parse_args()
 
     model_name = args.model.lower()
-    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov', 'bt_mov_time_decay'):
+    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov', 'bt_mov_time_decay', 'bt_vet'):
         raise SystemExit('Unknown model: ' + model_name)
 
     team_to_players = load_teams(TEAMS)

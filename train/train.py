@@ -54,6 +54,7 @@ from models.trueskill import TrueSkillModel
 from models.trueskill_mov import TrueSkillMovModel
 from models.bt_mov import BTMOVModel
 from models.bt_mov_time_decay import BTMOVTimeDecayModel
+from models.bt_vet import BTVetModel
 
 MODEL_CLASSES = {
     'elo': EloModel,
@@ -61,6 +62,7 @@ MODEL_CLASSES = {
     'trueskill_mov': TrueSkillMovModel,
     'bt_mov': BTMOVModel,
     'bt_mov_time_decay': BTMOVTimeDecayModel,
+    'bt_vet': BTVetModel,
 }
 
 

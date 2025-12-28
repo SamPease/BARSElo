@@ -73,6 +73,7 @@
             <button class="tab active" data-tab="players" onclick="switchTab('players')">Players</button>
             <button class="tab" data-tab="teams" onclick="switchTab('teams')">Teams</button>
             <button class="tab" data-tab="changes" onclick="switchTab('changes')">Changes</button>
+            <button class="tab" data-tab="compare" onclick="switchTab('compare')">Compare</button>
         </div>
         <div id="pageContent" class="loading">Loading data...</div>
     </div>
@@ -127,6 +128,9 @@ function handleRoute() {
     } else if (hash === '/changes') {
         showChangesTab();
         setActiveTab('changes');
+    } else if (hash === '/compare') {
+        showCompareTab();
+        setActiveTab('compare');
     } else {
         showPlayersTab();
         setActiveTab('players');
@@ -140,6 +144,7 @@ function switchTab(tab) {
     if (tab === 'players') navigate('/');
     else if (tab === 'teams') navigate('/teams');
     else if (tab === 'changes') navigate('/changes');
+    else if (tab === 'compare') navigate('/compare');
 }
 
 function setActiveTab(tab) {
@@ -242,16 +247,26 @@ function showTeamsTab() {
         starting_elo: TEAM_ELO_SUMMARY[name]?.starting_elo ?? null
     }));
     
-    // Default sort by Final ELO
-    if (currentSort.table !== 'teams') currentSort = { table: 'teams', column: 'final_elo', direction: 'desc' };
+    // Add change_elo calculated field
+    teams.forEach(t => {
+        if (t.final_elo !== null && t.starting_elo !== null) {
+            t.change_elo = t.final_elo - t.starting_elo;
+        } else {
+            t.change_elo = null;
+        }
+    });
+    
+    // Default sort by change_elo
+    if (currentSort.table !== 'teams') currentSort = { table: 'teams', column: 'change_elo', direction: 'desc' };
     sortData(teams, currentSort.column, currentSort.direction);
     
     let html = `<p>Click a team name to view details.</p>
         <input type="text" class="filter-input" placeholder="Filter teams..." onkeyup="filterTable('teamTable', 0)">
         <table id="teamTable"><thead><tr>
             <th onclick="sortTeamsTable('name')">Team</th>
-            <th onclick="sortTeamsTable('final_elo')">Final ELO</th>
             <th onclick="sortTeamsTable('current_elo_avg')">Current ELO</th>
+            <th onclick="sortTeamsTable('change_elo')">Change in ELO</th>
+            <th onclick="sortTeamsTable('final_elo')">Final ELO</th>
             <th onclick="sortTeamsTable('starting_elo')">Starting ELO</th>
             <th class="win-pct-col" onclick="sortTeamsTable('win_pct')">Win %</th>
             <th onclick="sortTeamsTable('games')">Games</th>
@@ -261,10 +276,13 @@ function showTeamsTab() {
     teams.forEach(t => {
         const wp = t.win_pct !== null ? `${(t.win_pct*100).toFixed(1)}% (W:${t.wins} L:${t.losses} T:${t.draws})` : '';
         const lp = t.last_game ? new Date(t.last_game).toLocaleDateString() : 'Never';
+        const changeElo = t.change_elo !== null ? t.change_elo.toFixed(2) : 'N/A';
+        const changeStyle = t.change_elo !== null && t.change_elo !== 0 ? (t.change_elo > 0 ? 'color: green;' : 'color: red;') : '';
         html += `<tr>
             <td><a href="#/team/${encodeURIComponent(t.name)}">${escapeHtml(t.name)}</a></td>
-            <td>${t.final_elo?.toFixed(2) ?? 'N/A'}</td>
             <td>${t.current_elo_avg?.toFixed(2) ?? 'N/A'}</td>
+            <td style="${changeStyle}">${changeElo}</td>
+            <td>${t.final_elo?.toFixed(2) ?? 'N/A'}</td>
             <td>${t.starting_elo?.toFixed(2) ?? 'N/A'}</td>
             <td class="win-pct-col">${wp}</td>
             <td>${t.games}</td>
@@ -292,6 +310,764 @@ function showChangesTab() {
     
     document.getElementById('pageContent').innerHTML = html;
     updateChangesData();
+}
+
+// Compare tab
+function showCompareTab() {
+    let html = `<h3>Compare Players or Teams</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 20px;">
+            <div>
+                <h4>First Item</h4>
+                <input type="text" id="compareInput1" placeholder="Enter player or team name..." style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div>
+                <h4>Second Item</h4>
+                <input type="text" id="compareInput2" placeholder="Enter player or team name..." style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+        </div>
+        <button onclick="updateCompareDisplay()" style="padding: 8px 16px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px;">Compare</button>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 20px;">
+            <div id="compareData1"></div>
+            <div id="compareData2"></div>
+            <div id="compareHeadToHead" style="grid-column: 1 / span 2;"></div>
+            <div id="compareSharedTeams" style="grid-column: 1 / span 2;"></div>
+            <div id="compareEloChart" style="grid-column: 1 / span 2;"></div>
+        </div>`;
+    
+    document.getElementById('pageContent').innerHTML = html;
+    
+    // Allow Enter key to trigger compare
+    document.addEventListener('keypress', (e) => {
+        const input1 = document.getElementById('compareInput1');
+        const input2 = document.getElementById('compareInput2');
+        if ((e.target === input1 || e.target === input2) && e.key === 'Enter') {
+            updateCompareDisplay();
+        }
+    });
+}
+
+function updateCompareDisplay() {
+    const input1 = document.getElementById('compareInput1')?.value.trim() || '';
+    const input2 = document.getElementById('compareInput2')?.value.trim() || '';
+    
+    const data1 = getCompareData(input1);
+    // If first item is found, restrict second search to same type
+    const restrictType = data1 ? data1.type : null;
+    const data2 = getCompareData(input2, restrictType);
+    
+    const container1 = document.getElementById('compareData1');
+    const container2 = document.getElementById('compareData2');
+    const h2hContainer = document.getElementById('compareHeadToHead');
+    
+    if (data1 && data2) {
+        // Both found: render side-by-side comparison with h2h in middle
+        container1.innerHTML = formatCompareDataWithComparison(data1, data2, true);
+        container2.innerHTML = formatCompareDataWithComparison(data2, data1, false);
+        const h2hData = getHeadToHeadData(data1, data2);
+        if (h2hData) {
+            h2hContainer.innerHTML = formatHeadToHeadData(h2hData);
+        } else {
+            h2hContainer.innerHTML = '<div style="border: 1px solid #ddd; border-radius: 4px; padding: 15px; background: #f8f9fa;"><p style="color: #999; text-align: center;">No head-to-head matches found.</p></div>';
+        }
+
+        const sharedTeamsData = getSharedTeamsData(data1, data2);
+        const sharedTeamsContainer = document.getElementById('compareSharedTeams');
+        if (sharedTeamsData && sharedTeamsData.rows.length > 0) {
+            sharedTeamsContainer.innerHTML = formatSharedTeamsData(sharedTeamsData.rows, sharedTeamsData.summary);
+        } else {
+            sharedTeamsContainer.innerHTML = '';
+        }
+
+        renderCompareEloChart(data1, data2);
+    } else if (data1) {
+        container1.innerHTML = formatCompareData(data1, input1);
+        const typeMsg = restrictType ? ` (only ${restrictType}s allowed)` : '';
+        container2.innerHTML = input2 ? `<p style="color: #999;">No ${restrictType || 'player or team'} found${typeMsg}.</p>` : '';
+        h2hContainer.innerHTML = '';
+        document.getElementById('compareSharedTeams').innerHTML = '';
+        document.getElementById('compareEloChart').innerHTML = '';
+    } else if (data2) {
+        container1.innerHTML = input1 ? '<p style="color: #999;">No player or team found.</p>' : '';
+        container2.innerHTML = formatCompareData(data2, input2);
+        h2hContainer.innerHTML = '';
+        document.getElementById('compareSharedTeams').innerHTML = '';
+        document.getElementById('compareEloChart').innerHTML = '';
+    } else {
+        container1.innerHTML = input1 ? '<p style="color: #999;">No player or team found.</p>' : '';
+        const typeMsg = restrictType ? ` (only ${restrictType}s allowed)` : '';
+        container2.innerHTML = input2 ? `<p style="color: #999;">No ${restrictType || 'player or team'} found${typeMsg}.</p>` : '';
+        h2hContainer.innerHTML = '';
+        document.getElementById('compareSharedTeams').innerHTML = '';
+        document.getElementById('compareEloChart').innerHTML = '';
+    }
+}
+
+function getCompareData(name, restrictType = null) {
+    if (!name) return null;
+    
+    // Case-insensitive search: try exact match first, then partial match
+    const nameLower = name.toLowerCase();
+    let playerMatch = null;
+    let teamMatch = null;
+    
+    // Exact match
+    if (!restrictType || restrictType === 'player') {
+        for (const [key, val] of Object.entries(DATA.players)) {
+            if (key.toLowerCase() === nameLower) {
+                playerMatch = key;
+                break;
+            }
+        }
+    }
+    if (!restrictType || restrictType === 'team') {
+        for (const [key, val] of Object.entries(DATA.teams)) {
+            if (key.toLowerCase() === nameLower) {
+                teamMatch = key;
+                break;
+            }
+        }
+    }
+    
+    // Partial match if no exact match
+    if (!playerMatch && (!restrictType || restrictType === 'player')) {
+        for (const key of Object.keys(DATA.players)) {
+            if (key.toLowerCase().includes(nameLower)) {
+                playerMatch = key;
+                break;
+            }
+        }
+    }
+    if (!teamMatch && (!restrictType || restrictType === 'team')) {
+        for (const key of Object.keys(DATA.teams)) {
+            if (key.toLowerCase().includes(nameLower)) {
+                teamMatch = key;
+                break;
+            }
+        }
+    }
+    
+    // Use whichever we found (prefer exact match by checking both)
+    if (playerMatch && !teamMatch) {
+        const player = DATA.players[playerMatch];
+        const allElos = Object.values(DATA.players).map(p => p.current_elo).filter(e => e !== null).sort((a, b) => b - a);
+        const rank = player.current_elo ? allElos.indexOf(player.current_elo) + 1 : null;
+        const percentile = rank ? (100 * (allElos.length - rank + 1) / allElos.length).toFixed(1) : null;
+        const winPct = player.games > 0 ? (100 * (player.wins + 0.5 * player.draws) / player.games).toFixed(1) : 'N/A';
+        
+        return {
+            type: 'player',
+            name: playerMatch,
+            data: {
+                'ELO': player.current_elo?.toFixed(2) ?? 'N/A',
+                'Rank': rank ? `#${rank}` : 'N/A',
+                'Percentile': percentile ? `${percentile}%` : 'N/A',
+                'Peak ELO': player.peak_elo?.toFixed(2) ?? 'N/A',
+                'Min ELO': player.min_elo?.toFixed(2) ?? 'N/A',
+                'Record': `${player.wins}-${player.losses}-${player.draws}`,
+                'Win %': winPct,
+                'Games': player.games,
+                'Last Played': player.last_played ? new Date(player.last_played).toLocaleDateString() : 'Never'
+            }
+        };
+    }
+    
+    if (teamMatch && !playerMatch) {
+        const team = DATA.teams[teamMatch];
+        const teamElo = TEAM_ELO_SUMMARY[teamMatch] || {};
+        const allTeamFinalElos = Object.values(TEAM_ELO_SUMMARY).map(t => t.final_elo).filter(e => e !== null).sort((a, b) => b - a);
+        const finalRank = teamElo.final_elo !== null && teamElo.final_elo !== undefined ? allTeamFinalElos.indexOf(teamElo.final_elo) + 1 : null;
+        const finalPercentile = finalRank ? (100 * (allTeamFinalElos.length - finalRank + 1) / allTeamFinalElos.length).toFixed(1) : null;
+        const winPct = team.games > 0 ? (100 * (team.wins + 0.5 * team.draws) / team.games).toFixed(1) : 'N/A';
+        
+        return {
+            type: 'team',
+            name: teamMatch,
+            data: {
+                'Final ELO': teamElo.final_elo?.toFixed(2) ?? 'N/A',
+                'Final Rank': finalRank ? `#${finalRank}` : 'N/A',
+                'Final Percentile': finalPercentile ? `${finalPercentile}%` : 'N/A',
+                'Current ELO': teamElo.current_elo?.toFixed(2) ?? team.current_elo?.toFixed(2) ?? 'N/A',
+                'Starting ELO': teamElo.starting_elo?.toFixed(2) ?? 'N/A',
+                'ELO Change': teamElo.final_elo && teamElo.starting_elo ? (teamElo.final_elo - teamElo.starting_elo).toFixed(2) : 'N/A',
+                'Record': `${team.wins}-${team.losses}-${team.draws}`,
+                'Win %': winPct,
+                'Games': team.games,
+                'First Game': team.first_game ? new Date(team.first_game).toLocaleDateString() : 'Never',
+                'Last Game': team.last_game ? new Date(team.last_game).toLocaleDateString() : 'Never'
+            }
+        };
+    }
+    
+    // If both match, prefer based on restrictType or player if neither restricted
+    if (playerMatch && teamMatch) {
+        const usePlayer = !restrictType || restrictType === 'player';
+        if (usePlayer) {
+            const player = DATA.players[playerMatch];
+            const allElos = Object.values(DATA.players).map(p => p.current_elo).filter(e => e !== null).sort((a, b) => b - a);
+            const rank = player.current_elo ? allElos.indexOf(player.current_elo) + 1 : null;
+            const percentile = rank ? (100 * (allElos.length - rank + 1) / allElos.length).toFixed(1) : null;
+            const winPct = player.games > 0 ? (100 * (player.wins + 0.5 * player.draws) / player.games).toFixed(1) : 'N/A';
+            
+            return {
+                type: 'player',
+                name: playerMatch,
+                data: {
+                    'ELO': player.current_elo?.toFixed(2) ?? 'N/A',
+                    'Rank': rank ? `#${rank}` : 'N/A',
+                    'Percentile': percentile ? `${percentile}%` : 'N/A',
+                    'Peak ELO': player.peak_elo?.toFixed(2) ?? 'N/A',
+                    'Min ELO': player.min_elo?.toFixed(2) ?? 'N/A',
+                    'Record': `${player.wins}-${player.losses}-${player.draws}`,
+                    'Win %': winPct,
+                    'Games': player.games,
+                    'Last Played': player.last_played ? new Date(player.last_played).toLocaleDateString() : 'Never'
+                }
+            };
+        } else {
+            const team = DATA.teams[teamMatch];
+            const teamElo = TEAM_ELO_SUMMARY[teamMatch] || {};
+            const allTeamFinalElos = Object.values(TEAM_ELO_SUMMARY).map(t => t.final_elo).filter(e => e !== null).sort((a, b) => b - a);
+            const finalRank = teamElo.final_elo !== null && teamElo.final_elo !== undefined ? allTeamFinalElos.indexOf(teamElo.final_elo) + 1 : null;
+            const finalPercentile = finalRank ? (100 * (allTeamFinalElos.length - finalRank + 1) / allTeamFinalElos.length).toFixed(1) : null;
+            const winPct = team.games > 0 ? (100 * (team.wins + 0.5 * team.draws) / team.games).toFixed(1) : 'N/A';
+            
+            return {
+                type: 'team',
+                name: teamMatch,
+                data: {
+                    'Final ELO': teamElo.final_elo?.toFixed(2) ?? 'N/A',
+                    'Final Rank': finalRank ? `#${finalRank}` : 'N/A',
+                    'Final Percentile': finalPercentile ? `${finalPercentile}%` : 'N/A',
+                    'Current ELO': teamElo.current_elo?.toFixed(2) ?? team.current_elo?.toFixed(2) ?? 'N/A',
+                    'Starting ELO': teamElo.starting_elo?.toFixed(2) ?? 'N/A',
+                    'ELO Change': teamElo.final_elo && teamElo.starting_elo ? (teamElo.final_elo - teamElo.starting_elo).toFixed(2) : 'N/A',
+                    'Record': `${team.wins}-${team.losses}-${team.draws}`,
+                    'Win %': winPct,
+                    'Games': team.games,
+                    'First Game': team.first_game ? new Date(team.first_game).toLocaleDateString() : 'Never',
+                    'Last Game': team.last_game ? new Date(team.last_game).toLocaleDateString() : 'Never'
+                }
+            };
+        }
+    }
+    
+    return null;
+}
+
+function formatCompareData(compareData, name) {
+    const data = compareData.data;
+    let html = `<div style="border: 1px solid #ddd; border-radius: 4px; padding: 15px; background: #f8f9fa;">
+        <h4 style="margin-top: 0;"><a href="#/${compareData.type === 'player' ? 'player' : 'team'}/${encodeURIComponent(compareData.name)}" style="color: #0066cc; text-decoration: none;">${escapeHtml(compareData.name)}</a></h4>
+        <p style="font-size: 12px; color: #666; margin-bottom: 10px;">${compareData.type === 'player' ? 'Player' : 'Team'}</p>`;
+    
+    Object.entries(data).forEach(([key, value]) => {
+        html += `<div style="margin-bottom: 8px; display: flex; justify-content: space-between;">
+            <span style="font-weight: 500; color: #333;">${escapeHtml(key)}:</span>
+            <span style="color: #666;">${escapeHtml(String(value))}</span>
+        </div>`;
+    });
+    
+    html += `</div>`;
+    return html;
+}
+
+function formatHeadToHeadData(h2hData) {
+    let html = `<div style="border: 1px solid #ddd; border-radius: 4px; padding: 15px; background: #f8f9fa;">
+        <h4 style="margin-top: 0; text-align: center;">Head-to-Head</h4>
+        <p style="text-align: center; font-size: 14px; margin-bottom: 8px;"><strong>Record: ${h2hData.record}</strong></p>
+        <p style="text-align: center; font-size: 13px; margin-bottom: 15px;">Point Differential: ${h2hData.pointDiff > 0 ? '+' : ''}${h2hData.pointDiff}</p>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+            <thead>
+                <tr style="background: #e9ecef;">
+                    <th style="padding: 6px; text-align: left; border-bottom: 1px solid #ddd; font-size: 11px;">Date</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">P1 Team</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">P2 Team</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">Result Only</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">Tournament Game</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${h2hData.games.map(g => `
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 6px; font-size: 11px;">${new Date(g.datetime).toLocaleDateString()}</td>
+                        <td style="padding: 6px; text-align: center; font-size: 11px; ${g.p1Score > g.p2Score ? 'color: green; font-weight: 600;' : g.p1Score < g.p2Score ? 'color: red; font-weight: 600;' : 'color: gray;'}">${g.p1TeamName} ${g.p1Score}</td>
+                        <td style="padding: 6px; text-align: center; font-size: 11px; ${g.p2Score > g.p1Score ? 'color: green; font-weight: 600;' : g.p2Score < g.p1Score ? 'color: red; font-weight: 600;' : 'color: gray;'}">${g.p2TeamName} ${g.p2Score}</td>
+                        <td style="padding: 6px; text-align: center; font-size: 11px; color: #555;">${g.outcomeOnly ? 'true' : ''}</td>
+                        <td style="padding: 6px; text-align: center; font-size: 11px; color: #555;">${g.tournamentGame ? 'true' : ''}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    </div>`;
+    return html;
+}
+
+function formatCompareDataWithComparison(primary, secondary, isPrimary) {
+    const data = primary.data;
+    let html = `<div style="border: 1px solid #ddd; border-radius: 4px; padding: 15px; background: #f8f9fa;">
+        <h4 style="margin-top: 0;"><a href="#/${primary.type === 'player' ? 'player' : 'team'}/${encodeURIComponent(primary.name)}" style="color: #0066cc; text-decoration: none;">${escapeHtml(primary.name)}</a></h4>
+        <p style="font-size: 12px; color: #666; margin-bottom: 10px;">${primary.type === 'player' ? 'Player' : 'Team'}</p>`;
+    
+    // Metrics where higher is better
+    const higherIsBetter = ['ELO', 'Peak ELO', 'Min ELO', 'Percentile', 'Final Percentile', 'Win %', 'Final ELO', 'Current ELO', 'Starting ELO', 'ELO Change'];
+    // Metrics where lower is better
+    const lowerIsBetter = ['Rank', 'Final Rank'];
+    
+    Object.entries(data).forEach(([key, value]) => {
+        let bgColor = 'transparent';
+        let textColor = '#666';
+        
+        // Try to parse and compare numeric values
+        const primaryVal = parseFloat(value);
+        const secondaryVal = secondary.data[key] ? parseFloat(secondary.data[key]) : null;
+        
+        if (!isNaN(primaryVal) && secondaryVal !== null && !isNaN(secondaryVal) && primaryVal !== secondaryVal) {
+            if (higherIsBetter.includes(key) && primaryVal > secondaryVal) {
+                bgColor = '#d4edda';
+                textColor = '#155724';
+            } else if (higherIsBetter.includes(key) && primaryVal < secondaryVal) {
+                bgColor = '#f8d7da';
+                textColor = '#721c24';
+            } else if (lowerIsBetter.includes(key) && primaryVal < secondaryVal) {
+                bgColor = '#d4edda';
+                textColor = '#155724';
+            } else if (lowerIsBetter.includes(key) && primaryVal > secondaryVal) {
+                bgColor = '#f8d7da';
+                textColor = '#721c24';
+            }
+        }
+        
+        html += `<div style="margin-bottom: 8px; display: flex; justify-content: space-between; padding: 6px; background-color: ${bgColor}; border-radius: 3px;">
+            <span style="font-weight: 500; color: #333;">${escapeHtml(key)}:</span>
+            <span style="color: ${textColor};">${escapeHtml(String(value))}</span>
+        </div>`;
+    });
+    
+    html += `</div>`;
+    return html;
+}
+
+function getHeadToHeadData(player1, player2) {
+    const games = DATA.games_with_scores || [];
+    let h2hGames = [];
+    let wins = 0, losses = 0, draws = 0;
+    let pointsFor = 0, pointsAgainst = 0;
+    const toBool = (val) => val === true || val === 1 || val === '1' || val === 'true';
+    
+    if (player1.type === 'player' && player2.type === 'player') {
+        // Player vs Player: find games where their teams played each other
+        const player1Teams = DATA.players[player1.name]?.teams || [];
+        const player2Teams = DATA.players[player2.name]?.teams || [];
+        
+        for (const game of games) {
+            const p1InGame = player1Teams.includes(game.team1) || player1Teams.includes(game.team2);
+            const p2InGame = player2Teams.includes(game.team1) || player2Teams.includes(game.team2);
+            
+            if (p1InGame && p2InGame) {
+                // Disambiguate which side each player was on (handles players who have been on both teams historically)
+                const p1Has1 = player1Teams.includes(game.team1);
+                const p1Has2 = player1Teams.includes(game.team2);
+                const p2Has1 = player2Teams.includes(game.team1);
+                const p2Has2 = player2Teams.includes(game.team2);
+
+                let p1Team = null;
+                if (p1Has1 && !p1Has2) p1Team = game.team1;
+                else if (p1Has2 && !p1Has1) p1Team = game.team2;
+                else if (p1Has1 && p1Has2) {
+                    if (p2Has1 && !p2Has2) p1Team = game.team2;
+                    else if (p2Has2 && !p2Has1) p1Team = game.team1;
+                    else p1Team = game.team1; // fallback
+                }
+
+                let p2Team = null;
+                if (p2Has1 && !p2Has2) p2Team = game.team1;
+                else if (p2Has2 && !p2Has1) p2Team = game.team2;
+                else if (p2Has1 && p2Has2) {
+                    if (p1Team === game.team1) p2Team = game.team2;
+                    else if (p1Team === game.team2) p2Team = game.team1;
+                    else p2Team = game.team1; // fallback
+                }
+
+                if (!p1Team) p1Team = p2Team === game.team1 ? game.team2 : game.team1;
+                if (!p2Team) p2Team = p1Team === game.team1 ? game.team2 : game.team1;
+
+                // If both players are on the same team in this game, treat it as a shared team appearance (not head-to-head)
+                if (p1Team === p2Team) continue;
+
+                // Determine result from player1's perspective
+                let result = 'D';
+                
+                if (p1Team === game.team1) {
+                    if (game.score1 > game.score2) result = 'W';
+                    else if (game.score1 < game.score2) result = 'L';
+                } else {
+                    if (game.score2 > game.score1) result = 'W';
+                    else if (game.score2 < game.score1) result = 'L';
+                }
+                
+                if (result === 'W') wins++;
+                else if (result === 'L') losses++;
+                else draws++;
+                
+                const outcomeOnly = toBool(game.outcome_only ?? game.outcomeOnly);
+                const tournamentGame = toBool(game.tournament ?? game.tournamentGame);
+
+                // Points for/against from player1's perspective
+                if (!outcomeOnly) {
+                    if (p1Team === game.team1) {
+                        pointsFor += game.score1;
+                        pointsAgainst += game.score2;
+                    } else {
+                        pointsFor += game.score2;
+                        pointsAgainst += game.score1;
+                    }
+                }
+                
+                const p1Score = p1Team === game.team1 ? game.score1 : game.score2;
+                const p2Score = p2Team === game.team1 ? game.score1 : game.score2;
+                h2hGames.push({
+                    datetime: game.datetime,
+                    p1TeamName: p1Team,
+                    p2TeamName: p2Team,
+                    p1Score,
+                    p2Score,
+                    outcomeOnly,
+                    tournamentGame,
+                    result: result
+                });
+            }
+        }
+    } else if (player1.type === 'team' && player2.type === 'team') {
+        // Team vs Team: find games where they played each other
+        const team1Name = player1.name;
+        const team2Name = player2.name;
+        
+        for (const game of games) {
+            const isMatchup = (game.team1 === team1Name && game.team2 === team2Name) || 
+                             (game.team1 === team2Name && game.team2 === team1Name);
+            
+            if (isMatchup) {
+                let result = 'D';
+                if (game.team1 === team1Name) {
+                    if (game.score1 > game.score2) result = 'W';
+                    else if (game.score1 < game.score2) result = 'L';
+                } else {
+                    if (game.score2 > game.score1) result = 'W';
+                    else if (game.score2 < game.score1) result = 'L';
+                }
+                
+                if (result === 'W') wins++;
+                else if (result === 'L') losses++;
+                else draws++;
+                
+                const outcomeOnly = toBool(game.outcome_only ?? game.outcomeOnly);
+                const tournamentGame = toBool(game.tournament ?? game.tournamentGame);
+
+                // Points for/against from team1's perspective (player1)
+                if (!outcomeOnly) {
+                    if (game.team1 === team1Name) {
+                        pointsFor += game.score1;
+                        pointsAgainst += game.score2;
+                    } else {
+                        pointsFor += game.score2;
+                        pointsAgainst += game.score1;
+                    }
+                }
+                
+                const p1Score = game.team1 === team1Name ? game.score1 : game.score2;
+                const p2Score = game.team1 === team2Name ? game.score1 : game.score2;
+                h2hGames.push({
+                    datetime: game.datetime,
+                    p1TeamName: team1Name,
+                    p2TeamName: team2Name,
+                    p1Score,
+                    p2Score,
+                    outcomeOnly,
+                    tournamentGame,
+                    result: result
+                });
+            }
+        }
+    }
+    
+    if (h2hGames.length === 0) return null;
+    
+    // Sort by date descending (most recent first)
+    h2hGames.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
+    
+    const record = `${wins}-${draws}-${losses}`; // P1 wins - draws - P2 wins
+    const pointDiff = pointsFor - pointsAgainst;
+    return { record, games: h2hGames, pointDiff, pointsFor, pointsAgainst };
+}
+
+function getSharedTeamsData(player1, player2) {
+    if (player1.type !== 'player' || player2.type !== 'player') return { rows: [], summary: null };
+    const teams1 = DATA.players[player1.name]?.teams || [];
+    const teams2 = DATA.players[player2.name]?.teams || [];
+    const shared = teams1.filter(t => teams2.includes(t));
+    if (shared.length === 0) return { rows: [], summary: null };
+
+    const sharedSet = new Set(shared);
+    const rows = shared.map(teamName => {
+        const team = DATA.teams[teamName];
+        if (!team) return null;
+        const summary = TEAM_ELO_SUMMARY[teamName] || {};
+        const currentElo = summary.current_elo ?? team.current_elo ?? null;
+        const startingElo = summary.starting_elo ?? null;
+        const finalElo = summary.final_elo ?? null;
+        const eloChange = (finalElo !== null && startingElo !== null) ? (finalElo - startingElo) : null;
+        return {
+            name: teamName,
+            currentElo,
+            eloChange,
+            finalElo,
+            startingElo,
+            winPct: team.games > 0 ? (team.wins + 0.5 * team.draws) / team.games : null,
+            wins: team.wins,
+            losses: team.losses,
+            draws: team.draws,
+            games: team.games,
+            lastGame: team.last_game
+        };
+    }).filter(Boolean);
+    rows.sort((a, b) => {
+        const aTime = a.lastGame ? new Date(a.lastGame).getTime() : -Infinity;
+        const bTime = b.lastGame ? new Date(b.lastGame).getTime() : -Infinity;
+        return bTime - aTime;
+    });
+
+    // Aggregate record together on shared teams
+    const games = DATA.games_with_scores || [];
+    let wins = 0, losses = 0, draws = 0, gamesTogether = 0;
+    for (const game of games) {
+        let sharedTeamPlayed = null;
+        if (sharedSet.has(game.team1)) sharedTeamPlayed = game.team1;
+        if (sharedSet.has(game.team2) && !sharedTeamPlayed) sharedTeamPlayed = game.team2;
+        if (!sharedTeamPlayed) continue;
+        if (game.score1 === undefined || game.score2 === undefined) continue;
+        const teamIs1 = sharedTeamPlayed === game.team1;
+        const scoreFor = teamIs1 ? game.score1 : game.score2;
+        const scoreAgainst = teamIs1 ? game.score2 : game.score1;
+        if (scoreFor > scoreAgainst) wins++;
+        else if (scoreFor < scoreAgainst) losses++;
+        else draws++;
+        gamesTogether++;
+    }
+    const summary = gamesTogether > 0 ? {
+        games: gamesTogether,
+        wins,
+        losses,
+        draws,
+        winPct: (wins + 0.5 * draws) / gamesTogether
+    } : null;
+
+    return { rows, summary };
+}
+
+function renderCompareEloChart(item1, item2) {
+    const container = document.getElementById('compareEloChart');
+    if (!container) return;
+    if (!item1 || !item2) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const timestamps = DATA.elo_history.timestamps.map(t => new Date(t));
+
+    const findLastChangeIdx = (values) => {
+        for (let i = values.length - 1; i > 0; i--) {
+            if (values[i] !== values[i - 1]) return i;
+        }
+        return values.length - 1;
+    };
+
+    if (item1.type === 'player' && item2.type === 'player') {
+        const p1 = item1.name;
+        const p2 = item2.name;
+        const elos1 = DATA.elo_history.players[p1];
+        const elos2 = DATA.elo_history.players[p2];
+        if (!elos1 || !elos2 || elos1.length !== timestamps.length || elos2.length !== timestamps.length) {
+            container.innerHTML = '<div style="border: 1px solid #ddd; border-radius: 4px; padding: 15px; background: #f8f9fa;"><p style="color: #999; text-align: center;">ELO history not available for one or both players.</p></div>';
+            return;
+        }
+
+        const findFirstAndLastGame = (playerName) => {
+            const player = DATA.players[playerName];
+            if (!player) return { firstGame: null, lastGame: null };
+            let firstGame = null;
+            let lastGame = player.last_played ? new Date(player.last_played) : null;
+            const playerTeams = Array.isArray(player.teams) ? player.teams : [];
+            const gamesList = DATA.games_with_scores || DATA.games || [];
+            for (const g of gamesList) {
+                const dt = new Date(g.datetime);
+                if (playerTeams.includes(g.team1) || playerTeams.includes(g.team2)) {
+                    if (!firstGame || dt < firstGame) firstGame = dt;
+                    if (!lastGame || dt > lastGame) lastGame = dt;
+                }
+            }
+            return { firstGame, lastGame };
+        };
+
+        const range1 = findFirstAndLastGame(p1);
+        const range2 = findFirstAndLastGame(p2);
+
+        let startIdx = 0;
+        const earliestFirstGame = [range1.firstGame, range2.firstGame].filter(Boolean).reduce((a, b) => a && a < b ? a : b, null);
+        if (earliestFirstGame) {
+            for (let i = timestamps.length - 1; i >= 0; i--) {
+                if (timestamps[i] < earliestFirstGame) { startIdx = i; break; }
+            }
+        }
+        startIdx = Math.max(0, startIdx);
+
+        const endIdx = Math.max(findLastChangeIdx(elos1), findLastChangeIdx(elos2));
+
+        const plotTimestamps = timestamps.slice(startIdx, endIdx + 1);
+        const plot1 = elos1.slice(startIdx, endIdx + 1);
+        const plot2 = elos2.slice(startIdx, endIdx + 1);
+
+        const trace1 = { x: plotTimestamps, y: plot1, mode: 'lines', name: p1, line: { color: '#1f77b4', width: 2 }, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+p1+'</extra>' };
+        const trace2 = { x: plotTimestamps, y: plot2, mode: 'lines', name: p2, line: { color: '#d62728', width: 2 }, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+p2+'</extra>' };
+        const baseline = { x: plotTimestamps, y: Array(plotTimestamps.length).fill(INITIAL_ELO), mode: 'lines', name: 'Starting ELO', line: { color: '#888', dash: 'dash', width: 1 }, hoverinfo: 'skip', showlegend: false };
+
+        const lastGameEither = [range1.lastGame, range2.lastGame].filter(Boolean).reduce((a, b) => a && a > b ? a : b, null);
+        const shapes = [];
+        if (plotTimestamps.length > 0 && lastGameEither) {
+            shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: plotTimestamps[0], x1: lastGameEither, y0: 0, y1: 1, fillcolor: 'lightyellow', opacity: 0.45, line: { width: 0 }, layer: 'below' });
+            shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: lastGameEither, x1: plotTimestamps[plotTimestamps.length - 1], y0: 0, y1: 1, fillcolor: 'lightblue', opacity: 0.35, line: { width: 0 }, layer: 'below' });
+        } else if (plotTimestamps.length > 0) {
+            shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: plotTimestamps[0], x1: plotTimestamps[plotTimestamps.length - 1], y0: 0, y1: 1, fillcolor: 'lightblue', opacity: 0.35, line: { width: 0 }, layer: 'below' });
+        }
+
+        const layout = {
+            title: 'ELO Over Time (Comparison)',
+            xaxis: { title: 'Date' },
+            yaxis: { title: 'ELO Rating' },
+            height: 450,
+            hovermode: 'x unified',
+            legend: { orientation: 'h', x: 0, y: 1.08, yanchor: 'bottom', bgcolor: 'rgba(255,255,255,0.9)', bordercolor: '#ddd', borderwidth: 1 },
+            margin: { t: 40, r: 20, b: 60, l: 60 },
+            shapes: shapes
+        };
+
+        Plotly.newPlot('compareEloChart', [baseline, trace1, trace2], layout, { responsive: true });
+        return;
+    }
+
+    if (item1.type === 'team' && item2.type === 'team') {
+        const t1 = item1.name;
+        const t2 = item2.name;
+        const team1 = DATA.teams[t1];
+        const team2 = DATA.teams[t2];
+        if (!team1 || !team2 || !team1.elo_history || !team2.elo_history) {
+            container.innerHTML = '<div style="border: 1px solid #ddd; border-radius: 4px; padding: 15px; background: #f8f9fa;"><p style="color: #999; text-align: center;">ELO history not available for one or both teams.</p></div>';
+            return;
+        }
+
+        const findTeamFirstLast = (teamName) => {
+            const gamesList = DATA.games_with_scores || DATA.games || [];
+            let firstGame = null;
+            let lastGame = null;
+            for (const g of gamesList) {
+                if (g.team1 === teamName || g.team2 === teamName) {
+                    const dt = new Date(g.datetime);
+                    if (!firstGame || dt < firstGame) firstGame = dt;
+                    if (!lastGame || dt > lastGame) lastGame = dt;
+                }
+            }
+            return { firstGame, lastGame };
+        };
+
+        const range1 = findTeamFirstLast(t1);
+        const range2 = findTeamFirstLast(t2);
+
+        let startIdx = 0;
+        const earliestFirst = [range1.firstGame, range2.firstGame].filter(Boolean).reduce((a, b) => a && a < b ? a : b, null);
+        if (earliestFirst) {
+            for (let i = timestamps.length - 1; i >= 0; i--) {
+                if (timestamps[i] < earliestFirst) { startIdx = i; break; }
+            }
+        }
+        startIdx = Math.max(0, startIdx);
+
+        const endIdx = Math.max(
+            findLastChangeIdx(team1.elo_history || []),
+            findLastChangeIdx(team2.elo_history || [])
+        );
+
+        const plotTimestamps = timestamps.slice(startIdx, endIdx + 1);
+        const plot1 = team1.elo_history.slice(startIdx, endIdx + 1);
+        const plot2 = team2.elo_history.slice(startIdx, endIdx + 1);
+
+        const trace1 = { x: plotTimestamps, y: plot1, mode: 'lines', name: t1, line: { color: '#1f77b4', width: 2 }, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+t1+'</extra>' };
+        const trace2 = { x: plotTimestamps, y: plot2, mode: 'lines', name: t2, line: { color: '#d62728', width: 2 }, hovertemplate: '%{x|%m/%d/%Y %H:%M}: %{y:.0f}<extra>'+t2+'</extra>' };
+        const baseline = { x: plotTimestamps, y: Array(plotTimestamps.length).fill(INITIAL_ELO), mode: 'lines', name: 'Starting ELO', line: { color: '#888', dash: 'dash', width: 1 }, hoverinfo: 'skip', showlegend: false };
+
+        const lastGameEither = [range1.lastGame, range2.lastGame].filter(Boolean).reduce((a, b) => a && a > b ? a : b, null);
+        const shapes = [];
+        if (plotTimestamps.length > 0 && lastGameEither) {
+            shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: plotTimestamps[0], x1: lastGameEither, y0: 0, y1: 1, fillcolor: 'lightyellow', opacity: 0.45, line: { width: 0 }, layer: 'below' });
+            shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: lastGameEither, x1: plotTimestamps[plotTimestamps.length - 1], y0: 0, y1: 1, fillcolor: 'lightblue', opacity: 0.35, line: { width: 0 }, layer: 'below' });
+        } else if (plotTimestamps.length > 0) {
+            shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: plotTimestamps[0], x1: plotTimestamps[plotTimestamps.length - 1], y0: 0, y1: 1, fillcolor: 'lightblue', opacity: 0.35, line: { width: 0 }, layer: 'below' });
+        }
+
+        const layout = {
+            title: 'ELO Over Time (Comparison)',
+            xaxis: { title: 'Date' },
+            yaxis: { title: 'ELO Rating' },
+            height: 450,
+            hovermode: 'x unified',
+            legend: { orientation: 'h', x: 0, y: 1.08, yanchor: 'bottom', bgcolor: 'rgba(255,255,255,0.9)', bordercolor: '#ddd', borderwidth: 1 },
+            margin: { t: 40, r: 20, b: 60, l: 60 },
+            shapes: shapes
+        };
+
+        Plotly.newPlot('compareEloChart', [baseline, trace1, trace2], layout, { responsive: true });
+        return;
+    }
+
+    container.innerHTML = '';
+}
+
+function formatSharedTeamsData(rows, summary) {
+    let html = `<div style="border: 1px solid #ddd; border-radius: 4px; padding: 15px; background: #f8f9fa;">
+        <h4 style="margin-top: 0; text-align: center;">Shared Teams</h4>`;
+    if (summary) {
+        const winPctStr = summary.winPct !== null && summary.winPct !== undefined ? `${(summary.winPct*100).toFixed(1)}%` : 'N/A';
+        html += `<p style="text-align: center; font-size: 13px; margin: 0 0 12px 0;">Games together: ${summary.games} • Record: ${summary.wins}-${summary.losses}-${summary.draws} • Win %: ${winPctStr}</p>`;
+    }
+    html += `<table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+            <thead>
+                <tr style="background: #e9ecef;">
+                    <th style="padding: 6px; text-align: left; border-bottom: 1px solid #ddd; font-size: 11px;">Team</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">Current ELO</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">Change in ELO</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">Final ELO</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">Starting ELO</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">Win %</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">Games</th>
+                    <th style="padding: 6px; text-align: center; border-bottom: 1px solid #ddd; font-size: 11px;">Last Played</th>
+                </tr>
+            </thead>
+            <tbody>`;
+    html += rows.map(r => {
+        const wp = r.winPct !== null && r.winPct !== undefined ? `${(r.winPct*100).toFixed(1)}% (W:${r.wins} L:${r.losses} T:${r.draws})` : 'N/A';
+        const lp = r.lastGame ? new Date(r.lastGame).toLocaleDateString() : 'Never';
+        const delta = r.eloChange !== null && r.eloChange !== undefined ? `${r.eloChange >= 0 ? '+' : ''}${r.eloChange.toFixed(2)}` : 'N/A';
+        return `<tr style="border-bottom: 1px solid #eee;">
+            <td style="padding: 6px; font-size: 11px;"><a href="#/team/${encodeURIComponent(r.name)}">${escapeHtml(r.name)}</a></td>
+            <td style="padding: 6px; text-align: center; font-size: 11px;">${r.currentElo !== null && r.currentElo !== undefined ? r.currentElo.toFixed(2) : 'N/A'}</td>
+            <td style="padding: 6px; text-align: center; font-size: 11px;">${delta}</td>
+            <td style="padding: 6px; text-align: center; font-size: 11px;">${r.finalElo !== null && r.finalElo !== undefined ? r.finalElo.toFixed(2) : 'N/A'}</td>
+            <td style="padding: 6px; text-align: center; font-size: 11px;">${r.startingElo !== null && r.startingElo !== undefined ? r.startingElo.toFixed(2) : 'N/A'}</td>
+            <td style="padding: 6px; text-align: center; font-size: 11px;">${wp}</td>
+            <td style="padding: 6px; text-align: center; font-size: 11px;">${r.games}</td>
+            <td style="padding: 6px; text-align: center; font-size: 11px;">${lp}</td>
+        </tr>`;
+    }).join('');
+    html += '</tbody></table></div>';
+    return html;
 }
 
 function updateChangesData() {
@@ -694,21 +1470,40 @@ function renderPlayerChart(playerName) {
     
     const timestamps = DATA.elo_history.timestamps.map(t => new Date(t));
     const player = DATA.players[playerName];
-    let startIdx = 0, endIdx = timestamps.length - 1;
     
-    if (player.teams && player.teams.length > 0) {
-        const teamGames = DATA.games.filter(g => player.teams.includes(g.team1) || player.teams.includes(g.team2));
-        if (teamGames.length > 0) {
-            const gameDates = teamGames.map(g => new Date(g.datetime));
-            const firstGame = new Date(Math.min(...gameDates));
-            const lastGame = new Date(Math.max(...gameDates));
-            for (let i = 0; i < timestamps.length; i++) {
-                if (timestamps[i] < firstGame) startIdx = i;
-                // Do not cap endIdx to last game; show up to latest data point
+    function findPlayerFirstAndLastGame() {
+        if (!player) return { firstGame: null, lastGame: null };
+        let firstGame = null;
+        let lastGame = player.last_played ? new Date(player.last_played) : null;
+        const playerTeams = Array.isArray(player.teams) ? player.teams : [];
+        const gamesList = DATA.games_with_scores || DATA.games || [];
+        for (const g of gamesList) {
+            const dt = new Date(g.datetime);
+            if (playerTeams.includes(g.team1) || playerTeams.includes(g.team2)) {
+                if (!firstGame || dt < firstGame) firstGame = dt;
+                if (!lastGame || dt > lastGame) lastGame = dt;
             }
-            startIdx = Math.max(0, startIdx);
+        }
+        return { firstGame, lastGame };
+    }
+
+    function findLastChangeIdx(values) {
+        for (let i = values.length - 1; i > 0; i--) {
+            if (values[i] !== values[i - 1]) return i; // index of last change
+        }
+        return values.length - 1; // fallback to latest
+    }
+
+    const { firstGame, lastGame } = findPlayerFirstAndLastGame();
+    let startIdx = 0;
+    if (firstGame) {
+        for (let i = timestamps.length - 1; i >= 0; i--) {
+            if (timestamps[i] < firstGame) { startIdx = i; break; }
         }
     }
+    startIdx = Math.max(0, startIdx);
+    const lastChangeIdx = findLastChangeIdx(playerElos);
+    let endIdx = lastChangeIdx;
     
     const plotTimestamps = timestamps.slice(startIdx, endIdx + 1);
     const plotElos = playerElos.slice(startIdx, endIdx + 1);
@@ -735,6 +1530,15 @@ function renderPlayerChart(playerName) {
     });
     
     traces.push({ x: plotTimestamps, y: Array(plotTimestamps.length).fill(INITIAL_ELO), mode: 'lines', name: 'Starting ELO', line: { color: 'red', dash: 'dash', width: 1 }, hoverinfo: 'skip', showlegend: false });
+    const shapes = [];
+    // Match team page: lightyellow from start through last game, lightblue after last game
+    if (plotTimestamps.length > 0 && lastGame) {
+        shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: plotTimestamps[0], x1: new Date(lastGame), y0: 0, y1: 1, fillcolor: 'lightyellow', opacity: 0.45, line: { width: 0 }, layer: 'below' });
+        shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: new Date(lastGame), x1: plotTimestamps[plotTimestamps.length - 1], y0: 0, y1: 1, fillcolor: 'lightblue', opacity: 0.35, line: { width: 0 }, layer: 'below' });
+    } else if (plotTimestamps.length > 0) {
+        // Fallback: all lightblue if no last game date
+        shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: plotTimestamps[0], x1: plotTimestamps[plotTimestamps.length - 1], y0: 0, y1: 1, fillcolor: 'lightblue', opacity: 0.35, line: { width: 0 }, layer: 'below' });
+    }
     const layout = {
         title: '',
         xaxis: { title: 'Date' },
@@ -750,7 +1554,8 @@ function renderPlayerChart(playerName) {
             bordercolor: '#ddd',
             borderwidth: 1
         },
-        margin: { t: 40, r: 20, b: 60, l: 60 }
+        margin: { t: 40, r: 20, b: 60, l: 60 },
+        shapes: shapes
     };
     Plotly.newPlot('playerChart', traces, layout, { responsive: true });
 }
@@ -766,28 +1571,42 @@ function renderTeamChart(teamName) {
     let earliestStartIdx = null;
     let latestEndIdx = null;
 
-    function findChangeRange(values) {
-        let firstChange = null;
-        let lastChange = null;
-        for (let i = 1; i < values.length; i++) {
-            if (values[i] !== values[i - 1]) {
-                if (firstChange === null) firstChange = i;
-                lastChange = i;
+    function findPlayerGameRange(playerName) {
+        const player = DATA.players[playerName];
+        if (!player) return null;
+        const playerElos = DATA.elo_history.players[playerName];
+        if (!playerElos || !Array.isArray(playerElos) || playerElos.length !== timestamps.length) return null;
+        // Determine first and last game dates for the player across all their teams
+        let firstGame = null;
+        let lastGame = player.last_played ? new Date(player.last_played) : null;
+        const playerTeams = Array.isArray(player.teams) ? player.teams : [];
+        // Use games_with_scores for consistency with player stats
+        const gamesList = DATA.games_with_scores || DATA.games || [];
+        for (const g of gamesList) {
+            const dt = new Date(g.datetime);
+            if (playerTeams.includes(g.team1) || playerTeams.includes(g.team2)) {
+                if (!firstGame || dt < firstGame) firstGame = dt;
+                if (!lastGame || dt > lastGame) lastGame = dt;
             }
         }
-        if (firstChange === null || lastChange === null) return null;
-        const startIdx = Math.max(0, firstChange - 1); // point before first game
-        const endIdx = lastChange; // through last game change
-        return { startIdx, endIdx };
+        if (!firstGame || !lastGame) return null;
+        // Map to indices: start = last timestamp strictly before firstGame; end = first timestamp on/after lastGame
+        let startIdx = 0;
+        for (let i = timestamps.length - 1; i >= 0; i--) {
+            if (timestamps[i] < firstGame) { startIdx = i; break; }
+        }
+        let endIdx = timestamps.length - 1;
+        for (let i = 0; i < timestamps.length; i++) {
+            if (timestamps[i] >= lastGame) { endIdx = i; break; }
+        }
+        return { startIdx, endIdx, playerElos };
     }
 
     team.members.forEach((playerName, idx) => {
-        const playerElos = DATA.elo_history.players[playerName];
-        if (!playerElos || !Array.isArray(playerElos) || playerElos.length !== timestamps.length) return;
-        const range = findChangeRange(playerElos);
+        const range = findPlayerGameRange(playerName);
         if (!range) return;
         const plotTimestamps = timestamps.slice(range.startIdx, range.endIdx + 1);
-        const plotElos = playerElos.slice(range.startIdx, range.endIdx + 1);
+        const plotElos = range.playerElos.slice(range.startIdx, range.endIdx + 1);
         playerRanges.push({ plotTimestamps, plotElos, startIdx: range.startIdx, endIdx: range.endIdx, color: colors[idx % colors.length], name: playerName });
         if (earliestStartIdx === null || range.startIdx < earliestStartIdx) earliestStartIdx = range.startIdx;
         if (latestEndIdx === null || range.endIdx > latestEndIdx) latestEndIdx = range.endIdx;
@@ -953,13 +1772,14 @@ function updateSortIndicators(tableId, column, direction) {
         'win_pct': 4,
         'games': 5,
         'last_played': 6,
-        // teams table (ordered as rendered)
-        'final_elo': 1,
-        'current_elo_avg': 2,
-        'starting_elo': 3,
-        'win_pct': 4,
-        'games': 5,
-        'last_game': 6
+        // teams table (ordered as rendered: team, current_elo_avg, change_elo, final_elo, starting_elo, win_pct, games, last_game)
+        'current_elo_avg': 1,
+        'change_elo': 2,
+        'final_elo': 3,
+        'starting_elo': 4,
+        'win_pct': 5,
+        'games': 6,
+        'last_game': 7
     };
     const headers = table.querySelectorAll('th');
     headers.forEach(th => th.classList.remove('sorted-asc', 'sorted-desc'));
