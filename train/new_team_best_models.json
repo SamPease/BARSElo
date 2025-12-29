@@ -1,29 +1,29 @@
 {
   "mode": "new_team",
-  "datetime": "2025-12-28T19:19:02.205821+00:00",
+  "datetime": "2025-12-28T22:04:00.901991+00:00",
   "models": {
     "bt_vet": {
-      "best_value": 0.6663711818734089,
+      "best_value": 0.6638074619604899,
       "objective_metric": "mean_nll",
       "params": {
-        "sigma_0": 4.012553111926419,
-        "beta": 0.7400931984266068,
-        "sigma": 8.765480596820257,
+        "sigma_0": 0.2246182199770129,
+        "beta": 9.108478936592485,
+        "sigma": 4.59157898478416,
         "display_center": 1000.0,
         "display_spread": 200.0
       },
       "mode_metrics": {
-        "mean_nll": 0.6663711818734089,
-        "mean_brier": 0.23810835353799364,
-        "mean_accuracy": 0.5572066927140763,
+        "mean_nll": 0.6638074619604899,
+        "mean_brier": 0.23678911012704018,
+        "mean_accuracy": 0.5682638199866523,
         "teams_scored": 139
       },
-      "trial": 68,
-      "trials": 100,
+      "trial": 192,
+      "trials": 200,
       "cross_mode_metrics": {
-        "nll": 0.6519818432966312,
-        "brier": 0.2309990114953043,
-        "accuracy": 0.6089466089466089,
+        "nll": 0.6338177729718072,
+        "brier": 0.22214020227221615,
+        "accuracy": 0.6262626262626263,
         "games_scored": 693
       }
     }

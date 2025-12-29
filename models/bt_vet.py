@@ -36,13 +36,13 @@ from .base import Model
 
 
 # Default hyperparameters
-DEFAULT_SIGMA_0 = 4.012553111926419  # Baseline regularization weight
-DEFAULT_BETA = 0.7400931984266068  # Weight decay rate per game
-DEFAULT_SIGMA = 8.765480596820257  # Margin noise scale (Gaussian/Normal distribution parameter)
+DEFAULT_SIGMA_0 = 0.2246182199770129  # Baseline regularization weight
+DEFAULT_BETA = 9.108478936592485  # Weight decay rate per game
+DEFAULT_SIGMA = 4.59157898478416  # Margin noise scale (Gaussian/Normal distribution parameter)
 
 # Visualization parameters
 DEFAULT_DISPLAY_CENTER = 1000.0  # Center for exposed ratings
-DEFAULT_DISPLAY_SPREAD = 200.0  # Spread for exposed ratings
+DEFAULT_DISPLAY_SPREAD = 100.0  # Spread for exposed ratings
 
 
 class BTVetModel(Model):
