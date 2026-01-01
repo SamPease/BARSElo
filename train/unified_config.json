@@ -160,6 +160,32 @@
                 }
             },
             "trials": 200
+        },
+        "bt_uncert": {
+            "defaults": {
+                "sigma": 4.640613533272829,
+                "alpha": 2.653385979219684,
+                "l2_lambda": 0.00019001486273543177,
+                "max_rating": 2000.0
+            },
+            "search": {
+                "sigma": {
+                    "type": "log",
+                    "low": 0.05,
+                    "high": 20.0
+                },
+                "alpha": {
+                    "type": "log",
+                    "low": 0.05,
+                    "high": 8.0
+                },
+                "l2_lambda": {
+                    "type": "log",
+                    "low": 1e-6,
+                    "high": 0.1
+                }
+            },
+            "trials": 100
         }
     },
     "metrics": [

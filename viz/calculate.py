@@ -29,6 +29,7 @@ from models.trueskill_mov import TrueSkillMovModel
 from models.bt_mov import BTMOVModel
 from models.bt_mov_time_decay import BTMOVTimeDecayModel
 from models.bt_vet import BTVetModel
+from models.bt_uncert import BTUncertModel
 
 # Default model name (can be changed)
 DEFAULT_MODEL = 'elo'  # 'elo' | 'trueskill' | 'trueskill_mov' | 'bt_vet'
@@ -76,6 +77,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
         'bt_mov': BTMOVModel,
         'bt_mov_time_decay': BTMOVTimeDecayModel,
         'bt_vet': BTVetModel,
+        'bt_uncert': BTUncertModel,
     }
     ModelClass = model_classes.get(model_name)
     if ModelClass is None:
@@ -171,12 +173,12 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov, bt_mov_time_decay, bt_vet')
+    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov, bt_mov_time_decay, bt_vet, bt_uncert')
     parser.add_argument('--force', '-f', action='store_true', help='Force recompute from scratch, ignoring existing results')
     args = parser.parse_args()
 
     model_name = args.model.lower()
-    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov', 'bt_mov_time_decay', 'bt_vet'):
+    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov', 'bt_mov_time_decay', 'bt_vet', 'bt_uncert'):
         raise SystemExit('Unknown model: ' + model_name)
 
     team_to_players = load_teams(TEAMS)

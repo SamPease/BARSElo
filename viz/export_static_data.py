@@ -24,7 +24,7 @@ import numpy as np
 from data.data_loader import parse_time_maybe
 
 # Constants
-ELO_RESULTS = 'viz/bt_vet_results.csv'
+ELO_RESULTS = 'viz/bt_uncert_results.csv'
 TEAMS_FILE = 'data/Sports Elo - Teams.csv'
 GAMES_FILE = 'data/Sports Elo - Games.csv'
 INITIAL_ELO = 1000
