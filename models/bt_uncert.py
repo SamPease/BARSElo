@@ -28,7 +28,7 @@ from .base import Model
 
 # Default hyperparameters
 DEFAULT_SIGMA = 3.4241681825996473  # Baseline observation std dev
-DEFAULT_ALPHA = 6.375363098674137  # Numerator in sigma_i formula: sigma_i = alpha / sqrt(n_i + 1)
+DEFAULT_ALPHA = 6.375363098674137  # Legacy scale (kept for compatibility; sigma_i now team-based)
 DEFAULT_L2_LAMBDA = 0.0018383063237865321  # L2 regularization weight
 
 # Visualization parameters
@@ -64,6 +64,8 @@ class BTUncertModel(Model):
         self.theta = defaultdict(float, warm_start if warm_start else {})
         self.games = []
         self.player_game_counts = defaultdict(int)
+        self.team_rosters = {}               # team_id -> frozenset(player_ids)
+        self.player_teams = defaultdict(list) # player_id -> list(team_ids) in appearance order
         
         # Cache for sparse matrices and metadata
         self._matrices_dirty = True
@@ -76,6 +78,9 @@ class BTUncertModel(Model):
         self._game_weights = None   # Weight per game (1.0 or 2.0 for tournaments)
         self._player_id_to_idx = {} # Mapping from player ID to matrix column index
         self._idx_to_player_id = [] # Inverse mapping
+        self._player_complexity = None  # C_i values from team diversity
+        self._player_sigmas_array = None
+        self._player_sigma_map = {}
 
     # =========================================================================
     # 1. CORE MATH KERNELS (Single Source of Truth)
@@ -113,18 +118,9 @@ class BTUncertModel(Model):
         z = d / sigma_eff
         return ndtr(z)  # Vectorized Gaussian CDF
 
-    def _calc_player_sigmas(self, counts_array):
-        """
-        Calculate per-player uncertainty sigma_i = alpha / sqrt(n_i + 1).
-        Works for vectors.
-        
-        Args:
-            counts_array: Game count for each player
-            
-        Returns:
-            Array of sigma_i values, minimum 1e-8
-        """
-        return np.maximum(self.alpha / np.sqrt(counts_array + 1.0), 1e-8)
+    def _calc_player_sigmas(self, complexities):
+        """Sigma_i = 1 / sqrt(1 + C_i), vectorized."""
+        return np.maximum(1.0 / np.sqrt(1.0 + complexities), 1e-8)
 
     # =========================================================================
     # 2. DATA MANAGEMENT (Sparse Matrix Construction)
@@ -141,7 +137,7 @@ class BTUncertModel(Model):
         """
         try:
             # Parse game row (matching original parsing logic)
-            time, t1, s1, t2, s2, outcome_flag, tourney_flag, players_field = (game_row + [None]*8)[:8]
+            time, team1_id, s1, team2_id, s2, outcome_flag, tourney_flag, players_field = (game_row + [None]*8)[:8]
         except Exception:
             return
         
@@ -171,6 +167,18 @@ class BTUncertModel(Model):
         else:
             outcome = 0      # Draw
             margin = 0
+
+        # Record stable team rosters and player-to-team memberships
+        self._record_team_roster(team1_id, team1_players)
+        self._record_team_roster(team2_id, team2_players)
+        if team1_id is not None:
+            for player in team1_players:
+                if team1_id not in self.player_teams[player]:
+                    self.player_teams[player].append(team1_id)
+        if team2_id is not None:
+            for player in team2_players:
+                if team2_id not in self.player_teams[player]:
+                    self.player_teams[player].append(team2_id)
         
         # Store game with computed flags
         self.games.append({
@@ -190,6 +198,18 @@ class BTUncertModel(Model):
         
         # Mark matrices as needing rebuild
         self._matrices_dirty = True
+
+    def _record_team_roster(self, team_id, roster):
+        """Persist stable team roster; merges if minor discrepancies appear."""
+        if team_id is None:
+            return
+        roster_set = frozenset(roster)
+        existing = self.team_rosters.get(team_id)
+        if existing is None:
+            self.team_rosters[team_id] = roster_set
+        elif existing != roster_set:
+            # Fallback: merge to tolerate data glitches while keeping determinism
+            self.team_rosters[team_id] = existing | roster_set
 
     def _build_matrices(self):
         """
@@ -253,7 +273,95 @@ class BTUncertModel(Model):
         self._margins = margins
         self._is_margin = is_margin
         self._game_weights = weights
+
+        # 5. Build player complexities and sigmas (team-based uncertainty)
+        self._compute_player_uncertainties()
         self._matrices_dirty = False
+
+    def _compute_player_uncertainties(self):
+        """Compute C_i from team diversity and derive sigma_i vectorized."""
+        n_p = len(self._idx_to_player_id)
+        if n_p == 0:
+            self._player_complexity = np.array([])
+            self._player_sigmas_array = np.array([])
+            self._player_sigma_map = {}
+            return
+
+        team_ids = list(self.team_rosters.keys())
+        n_t = len(team_ids)
+        if n_t == 0:
+            complexities = np.zeros(n_p)
+            sigmas = self._calc_player_sigmas(complexities)
+            self._player_complexity = complexities
+            self._player_sigmas_array = sigmas
+            self._player_sigma_map = {pid: sigmas[i] for i, pid in enumerate(self._idx_to_player_id)}
+            return
+
+        team_id_to_idx = {tid: i for i, tid in enumerate(team_ids)}
+
+        # Build sparse team-player incidence matrix
+        rows = []
+        cols = []
+        data = []
+        for tid, roster in self.team_rosters.items():
+            t_idx = team_id_to_idx[tid]
+            for player in roster:
+                if player not in self._player_id_to_idx:
+                    continue
+                rows.append(t_idx)
+                cols.append(self._player_id_to_idx[player])
+                data.append(1.0)
+
+        M = csr_matrix((data, (rows, cols)), shape=(n_t, n_p), dtype=float)
+        team_sizes = np.maximum(M.sum(axis=1).A1, 1e-12)
+
+        # Pairwise intersections only where overlap exists (sparse)
+        intersections = (M @ M.T).tocoo()
+        jaccard_rows = [dict() for _ in range(n_t)]
+        for i, j, inter in zip(intersections.row, intersections.col, intersections.data):
+            if i == j:
+                continue
+            union = team_sizes[i] + team_sizes[j] - inter
+            if union <= 0:
+                continue
+            jac = inter / union
+            if jac > 0:
+                jaccard_rows[i][j] = jac
+                jaccard_rows[j][i] = jac
+
+        # Compute C_i for each player using greedy accumulation in appearance order
+        complexities = np.zeros(n_p)
+        for p_idx, pid in enumerate(self._idx_to_player_id):
+            # Get teams in the order they appeared for this player
+            team_list = [team_id_to_idx[t] for t in self.player_teams.get(pid, []) if t in team_id_to_idx]
+            if not team_list:
+                complexities[p_idx] = 0.0
+                continue
+            
+            if len(team_list) == 1:
+                complexities[p_idx] = 1.0
+                continue
+            
+            # Greedy accumulation: first team contributes 1.0, subsequent teams contribute marginal uniqueness
+            score = 1.0  # First team
+            processed_teams = [team_list[0]]
+            
+            for t in team_list[1:]:
+                # Find max similarity against processed teams only
+                max_similarity = 0.0
+                for prev_t in processed_teams:
+                    max_similarity = max(max_similarity, jaccard_rows[t].get(prev_t, 0.0))
+                
+                # Add marginal uniqueness
+                score += (1.0 - max_similarity)
+                processed_teams.append(t)
+            
+            complexities[p_idx] = score
+
+        sigmas = self._calc_player_sigmas(complexities)
+        self._player_complexity = complexities
+        self._player_sigmas_array = sigmas
+        self._player_sigma_map = {pid: sigmas[i] for i, pid in enumerate(self._idx_to_player_id)}
 
     # =========================================================================
     # 3. OPTIMIZATION LOOP (Vectorized)
@@ -276,9 +384,10 @@ class BTUncertModel(Model):
         # Skill difference: d = X * theta (sparse matrix-vector product)
         d = self._X.dot(theta_vec)
         
-        # Player sigma values from game counts
-        counts_vec = np.array([self.player_game_counts[pid] for pid in self._idx_to_player_id])
-        p_sigmas = self._calc_player_sigmas(counts_vec)
+        # Player sigma values from team-based complexity
+        if self._player_sigmas_array is None:
+            self._compute_player_uncertainties()
+        p_sigmas = self._player_sigmas_array
         p_sigmas_sq = p_sigmas ** 2
         
         # Team sigmas: sum of sigma_sq, then average
@@ -440,19 +549,18 @@ class BTUncertModel(Model):
         Formula: sigma_team = sqrt(sum(sigma_i^2)) / n
                  sigma_eff = sqrt(sigma^2 + sigma_team_a^2 + sigma_team_b^2)
         """
-        # Sigma for each player
+        if self._player_sigma_map is None or not self._player_sigma_map:
+            self._compute_player_uncertainties()
+
+        # Sigma for each player using team-based uncertainty
         if roster_a:
-            # FIX: Parentheses ensure we square (alpha / sqrt(n+1)), not just sqrt(n+1)
-            sigma_sq_sum_a = sum((self.alpha / np.sqrt(self.player_game_counts.get(p, 0) + 1.0)) ** 2 
-                                 for p in roster_a)
+            sigma_sq_sum_a = sum((self._player_sigma_map.get(p, 1.0)) ** 2 for p in roster_a)
             sigma_team_a = np.sqrt(sigma_sq_sum_a) / len(roster_a)
         else:
             sigma_team_a = 0.0
         
         if roster_b:
-            # FIX: Parentheses ensure we square (alpha / sqrt(n+1)), not just sqrt(n+1)
-            sigma_sq_sum_b = sum((self.alpha / np.sqrt(self.player_game_counts.get(p, 0) + 1.0)) ** 2 
-                                 for p in roster_b)
+            sigma_sq_sum_b = sum((self._player_sigma_map.get(p, 1.0)) ** 2 for p in roster_b)
             sigma_team_b = np.sqrt(sigma_sq_sum_b) / len(roster_b)
         else:
             sigma_team_b = 0.0
@@ -502,14 +610,15 @@ class BTUncertModel(Model):
             return ratings
         
         # === Multi-player case: vectorized computation ===
+        if not self._player_sigma_map:
+            self._compute_player_uncertainties()
         
         # Extract skills and game counts for active players
         mus = np.array([self.theta[p] for p in active_ids])
-        counts = np.array([self.player_game_counts[p] for p in active_ids])
         n = len(active_ids)
         
-        # Compute player sigmas using shared kernel
-        sigmas = self._calc_player_sigmas(counts)
+        # Compute player sigmas using shared kernel (team-based uncertainty)
+        sigmas = np.array([self._player_sigma_map.get(p, 1.0) for p in active_ids])
         sigmas_sq = sigmas ** 2
         
         # Broadcast skill differences: (N, 1) - (1, N) -> (N, N)
