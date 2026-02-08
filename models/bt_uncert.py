@@ -27,9 +27,9 @@ from .base import Model
 
 
 # Default hyperparameters
-DEFAULT_SIGMA = 3.4241681825996473  # Baseline observation std dev
-DEFAULT_ALPHA = 6.375363098674137  # Legacy scale (kept for compatibility; sigma_i now team-based)
-DEFAULT_L2_LAMBDA = 0.0018383063237865321  # L2 regularization weight
+DEFAULT_SIGMA = 4.24581354317277  # Baseline observation std dev
+DEFAULT_ALPHA = 3.786410813463642  # Legacy scale (kept for compatibility; sigma_i now team-based)
+DEFAULT_L2_LAMBDA = 3.1513981619202584e-05  # L2 regularization weight
 
 # Visualization parameters
 DEFAULT_MAX_RATING = 2000.0  # Maximum rating for pairwise win probability scaling
@@ -439,28 +439,30 @@ class BTUncertModel(Model):
             cdf_z = ndtr(z)
             
             # === Outcome 1: Team A Wins ===
-            mask_win = (yo == 1)
+            # FIXED: Use combined mask to directly update grad_d (not mask_o copy)
+            mask_win = mask_o & (self._y == 1)
             if np.any(mask_win):
                 # Loss = -log(Phi(z))
-                cdf_win = np.maximum(cdf_z[mask_win], 1e-10)
-                loss -= np.sum(w_o[mask_win] * np.log(cdf_win))
+                cdf_win = np.maximum(cdf_z[yo == 1], 1e-10)
+                loss -= np.sum(w_o[yo == 1] * np.log(cdf_win))
                 
                 # Gradient = -phi / Phi * 1/sigma
                 # (Negated for NLL: dLoss/dd = -pdf/cdf / sigma)
-                ratio = pdf_z[mask_win] / cdf_win
-                grad_d[mask_o][mask_win] = -w_o[mask_win] * ratio / se_o[mask_win]
+                ratio = pdf_z[yo == 1] / cdf_win
+                grad_d[mask_win] = -w_o[yo == 1] * ratio / se_o[yo == 1]
             
             # === Outcome -1: Team B Wins ===
-            mask_loss = (yo == -1)
+            # FIXED: Use combined mask to directly update grad_d (not mask_o copy)
+            mask_loss = mask_o & (self._y == -1)
             if np.any(mask_loss):
                 # Loss = -log(1 - Phi(z)) = -log(Phi(-z))
-                cdf_inv = np.maximum(1.0 - cdf_z[mask_loss], 1e-10)
-                loss -= np.sum(w_o[mask_loss] * np.log(cdf_inv))
+                cdf_inv = np.maximum(1.0 - cdf_z[yo == -1], 1e-10)
+                loss -= np.sum(w_o[yo == -1] * np.log(cdf_inv))
                 
                 # Gradient = phi / (1 - Phi) * 1/sigma
                 # (Higher d hurts team A's loss, so positive gradient)
-                ratio = pdf_z[mask_loss] / cdf_inv
-                grad_d[mask_o][mask_loss] = w_o[mask_loss] * ratio / se_o[mask_loss]
+                ratio = pdf_z[yo == -1] / cdf_inv
+                grad_d[mask_loss] = w_o[yo == -1] * ratio / se_o[yo == -1]
             
             # === Outcome 0: Draw ===
             # Treat as 50/50, gradient is 0

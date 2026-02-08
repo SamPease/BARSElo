@@ -177,7 +177,7 @@
                 "alpha": {
                     "type": "log",
                     "low": 0.05,
-                    "high": 8.0
+                    "high": 20.0
                 },
                 "l2_lambda": {
                     "type": "log",
@@ -185,7 +185,7 @@
                     "high": 0.1
                 }
             },
-            "trials": 100
+            "trials": 200
         }
     },
     "metrics": [
