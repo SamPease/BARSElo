@@ -30,6 +30,7 @@ from models.bt_mov import BTMOVModel
 from models.bt_mov_time_decay import BTMOVTimeDecayModel
 from models.bt_vet import BTVetModel
 from models.bt_uncert import BTUncertModel
+from models.ttt import TTTModel
 
 # Default model name (can be changed)
 DEFAULT_MODEL = 'elo'  # 'elo' | 'trueskill' | 'trueskill_mov' | 'bt_vet'
@@ -60,6 +61,10 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
     """Unified runner for all models. Chooses instantiation and per-row handling
     based on `model_name` while preserving previous behavior.
     
+    For models that implement get_all_historical_ratings() (e.g., TTT), loads all
+    games at once then retrieves all historical ratings in a single call. For other
+    models, processes games incrementally.
+    
     Args:
         model_name (str): Name of the model to run
         team_to_players (dict): Mapping of team names to player lists
@@ -78,11 +83,15 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
         'bt_mov_time_decay': BTMOVTimeDecayModel,
         'bt_vet': BTVetModel,
         'bt_uncert': BTUncertModel,
+        'ttt': TTTModel,
     }
     ModelClass = model_classes.get(model_name)
     if ModelClass is None:
         raise SystemExit('Unknown model: ' + model_name)
     model = ModelClass()
+
+    # Check if model provides all historical ratings at once
+    provides_all_historical = hasattr(model, 'get_all_historical_ratings') and callable(getattr(model, 'get_all_historical_ratings'))
 
     history_map = OrderedDict()
     last_processed_time = None
@@ -133,52 +142,93 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
             initial_time_str = initial_dt.strftime('%m/%d/%Y %H:%M:%S')
             history_map[initial_time_str] = [initial_time_str] + model.expose(all_players)
 
-    games_processed = 0
-    num_existing_games = len(history_map) if last_processed_time else 0
+    # =========================================================================
+    # BRANCH 1: Models using all-historical-ratings (e.g., TTT)
+    # =========================================================================
+    if provides_all_historical and not last_processed_time:
+        # Load all games at once, then compute all historical ratings
+        print('Model provides all historical ratings. Loading all games and computing...')
+        
+        games_to_process = []
+        for row in games:
+            time = row[0] if len(row) > 0 else ''
+            t1 = row[1] if len(row) > 1 else ''
+            t2 = row[3] if len(row) > 3 else ''
+            
+            team1 = team_to_players.get(t1, [])
+            team2 = team_to_players.get(t2, [])
+            games_to_process.append((row, team1, team2))
+        
+        # Update model with all games
+        for row, team1, team2 in games_to_process:
+            model.update(row, team1, team2)
+        
+        # Get all historical ratings at once
+        all_historical = model.get_all_historical_ratings(all_players)
+        
+        if all_historical:
+            for time_str, ratings in all_historical.items():
+                history_map[time_str] = [time_str] + ratings
+            print(f'Processed {len(games_to_process)} games and computed {len(all_historical)} historical time steps.')
+        else:
+            print(f'Warning: get_all_historical_ratings returned empty. Falling back to incremental mode.')
+            # Fall through to incremental processing
+            for row, team1, team2 in games_to_process:
+                model.update(row, team1, team2)
+                time = row[0] if len(row) > 0 else ''
+                row_out = [time] + model.expose(all_players)
+                history_map[time] = row_out
     
-    for row in games:
-        # Treat every row uniformly: always pass the full row to the model.
-        # `game_row` layout expected by models: [time, t1, s1, t2, s2, outcome_flag, tourney_flag, players_field]
-        # Some rows may omit the 8th column; models should handle missing/None values.
-        time = row[0] if len(row) > 0 else ''
-        t1 = row[1] if len(row) > 1 else ''
-        t2 = row[3] if len(row) > 3 else ''
-
-        # Skip games we've already processed when resuming
-        # Only skip if the timestamp matches exactly and we're resuming from a known state
-        if last_processed_time:
-            # When resuming, skip all games at or before the last processed timestamp
-            # Use parse_time_maybe to handle various timestamp formats flexibly
-            game_dt = parse_time_maybe(time)
-            last_dt = parse_time_maybe(last_processed_time)
-            if game_dt and last_dt and game_dt <= last_dt:
-                continue
-
-        team1 = team_to_players.get(t1, [])
-        team2 = team_to_players.get(t2, [])
-
-        # Call model's update with the whole row; model decides what to use.
-        model.update(row, team1, team2)
-        row_out = [time] + model.expose(all_players)
-        history_map[time] = row_out
-        games_processed += 1
-
-    if last_processed_time:
-        print(f'Processed {games_processed} new games.')
+    # =========================================================================
+    # BRANCH 2: Incremental models (all others)
+    # =========================================================================
     else:
-        print(f'Processed {games_processed} total games.')
+        games_processed = 0
+        num_existing_games = len(history_map) if last_processed_time else 0
+        
+        for row in games:
+            # Treat every row uniformly: always pass the full row to the model.
+            # `game_row` layout expected by models: [time, t1, s1, t2, s2, outcome_flag, tourney_flag, players_field]
+            # Some rows may omit the 8th column; models should handle missing/None values.
+            time = row[0] if len(row) > 0 else ''
+            t1 = row[1] if len(row) > 1 else ''
+            t2 = row[3] if len(row) > 3 else ''
+
+            # Skip games we've already processed when resuming
+            # Only skip if the timestamp matches exactly and we're resuming from a known state
+            if last_processed_time:
+                # When resuming, skip all games at or before the last processed timestamp
+                # Use parse_time_maybe to handle various timestamp formats flexibly
+                game_dt = parse_time_maybe(time)
+                last_dt = parse_time_maybe(last_processed_time)
+                if game_dt and last_dt and game_dt <= last_dt:
+                    continue
+
+            team1 = team_to_players.get(t1, [])
+            team2 = team_to_players.get(t2, [])
+
+            # Call model's update with the whole row; model decides what to use.
+            model.update(row, team1, team2)
+            row_out = [time] + model.expose(all_players)
+            history_map[time] = row_out
+            games_processed += 1
+
+        if last_processed_time:
+            print(f'Processed {games_processed} new games.')
+        else:
+            print(f'Processed {games_processed} total games.')
 
     _write_map(output_file, all_players, history_map)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov, bt_mov_time_decay, bt_vet, bt_uncert')
+    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov, bt_mov_time_decay, bt_vet, bt_uncert, ttt')
     parser.add_argument('--force', '-f', action='store_true', help='Force recompute from scratch, ignoring existing results')
     args = parser.parse_args()
 
     model_name = args.model.lower()
-    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov', 'bt_mov_time_decay', 'bt_vet', 'bt_uncert'):
+    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov', 'bt_mov_time_decay', 'bt_vet', 'bt_uncert', 'ttt'):
         raise SystemExit('Unknown model: ' + model_name)
 
     team_to_players = load_teams(TEAMS)

@@ -19,6 +19,18 @@ class Model(ABC):
     def expose(self, players):
         raise NotImplementedError()
 
+    def converge(self):
+        """Optional: run batch convergence/optimization after adding games.
+
+        Models that benefit from full re-optimization (e.g., backward-smoothed
+        TTT, batch MLE) should override this.  The training loop calls this at
+        evaluation checkpoints; models decide internally whether the call is
+        worth the compute (e.g., skip if too few new games).
+
+        Default is a no-op.
+        """
+        pass
+
     def predict_win_prob(self, team1_players, team2_players, players_on_court=None):
         """Optional: return probability team1 beats team2.
 
@@ -41,3 +53,24 @@ class Model(ABC):
         Models that support resuming should override this method.
         """
         return False
+
+    def get_all_historical_ratings(self, all_players):
+        """Optional: return historical ratings for all time steps.
+
+        Some models (e.g., TrueSkill Through Time) update all past ratings
+        when a new game is added, so it's more efficient to compute all
+        historical ratings at once rather than incrementally.
+
+        Args:
+            all_players (list): List of all player IDs in order
+
+        Returns:
+            dict or None: If implemented, returns {time_str: [ratings...]}
+                         where time_str is the timestamp string and ratings
+                         are numerical values in the order of all_players.
+                         Otherwise returns None (default behavior).
+
+        Default implementation returns None (model computes ratings incrementally).
+        Models with full historical data should override this method.
+        """
+        return None

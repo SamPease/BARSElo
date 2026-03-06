@@ -1,31 +1,31 @@
 {
   "mode": "chrono",
-  "datetime": "2025-12-30T19:35:46.793549+00:00",
+  "datetime": "2026-03-06T20:26:58.330022+00:00",
   "models": {
-    "bt_uncert": {
-      "best_value": 0.6893859020070009,
+    "ttt": {
+      "best_value": 0.7727966695633997,
       "objective_metric": "nll",
       "params": {
-        "sigma": 3.4449207906802766,
-        "l2_lambda": 0.8992860401228783,
-        "sigma_min": 0.4663455337076152,
-        "alpha": 6.220410252866732,
-        "c": 1.3839704500818382,
+        "mu": 25.0,
+        "sigma": 8.3333333333333,
+        "beta": 5.574476214102242,
+        "gamma": 0.09154488708583937,
+        "p_draw": 0.06,
         "display_center": 1000.0,
         "display_spread": 200.0
       },
       "mode_metrics": {
-        "nll": 0.6893859020070009,
-        "brier": 0.24812019933550603,
-        "accuracy": 0.6046176046176046,
-        "games_scored": 693
+        "nll": 0.7727966695633997,
+        "brier": 0.2878007888548522,
+        "accuracy": 0.3945480631276901,
+        "games_scored": 697
       },
-      "trial": 1,
-      "trials": 2,
+      "trial": 4,
+      "trials": 5,
       "cross_mode_metrics": {
-        "mean_nll": 0.6914233663130364,
-        "mean_brier": 0.24913826610819936,
-        "mean_accuracy": 0.5435234734553175,
+        "mean_nll": 0.732533839030385,
+        "mean_brier": 0.26844771543921964,
+        "mean_accuracy": 0.4408696650650456,
         "teams_scored": 139
       }
     }

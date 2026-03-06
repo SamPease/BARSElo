@@ -186,6 +186,30 @@
                 }
             },
             "trials": 200
+        },
+        "ttt": {
+            "defaults": {
+                "mu": 25.0,
+                "sigma": 8.3333333333333,
+                "beta": 1.0,
+                "gamma": 0.02,
+                "p_draw": 0.06638418079,
+                "display_center": 1000.0,
+                "display_spread": 200.0
+            },
+            "search": {
+                "beta": {
+                    "type": "log",
+                    "low": 1.0,
+                    "high": 30.0
+                },
+                "gamma": {
+                    "type": "log",
+                    "low": 0.001,
+                    "high": 0.2
+                }
+            },
+            "trials": 200
         }
     },
     "metrics": [

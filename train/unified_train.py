@@ -46,6 +46,7 @@ import csv
 import json
 import math
 import os
+import time
 from datetime import datetime, timezone
 import sys
 
@@ -68,6 +69,7 @@ from models.bt_mov import BTMOVModel
 from models.bt_mov_time_decay import BTMOVTimeDecayModel
 from models.bt_vet import BTVetModel
 from models.bt_uncert import BTUncertModel
+from models.ttt import TTTModel
 
 MODEL_CLASSES = {
     'elo': EloModel,
@@ -77,6 +79,7 @@ MODEL_CLASSES = {
     'bt_mov_time_decay': BTMOVTimeDecayModel,
     'bt_vet': BTVetModel,
     'bt_uncert': BTUncertModel,
+    'ttt': TTTModel,
 }
 
 # ------------------ Utility ------------------
@@ -179,79 +182,121 @@ def chronological_key(row):
     return (t is None, t or datetime.min)
 
 
-def evaluate_new_team(model_name, params, games, teams_map, limit_eval_games=None):
-    # map teams to games
-    team_games = {}
+def _build_new_team_metadata(games):
+    """Build first-appearance times and per-team eval rows in one pass."""
+    rows_with_time = []
+    first_time_by_team = {}
+    eval_rows_by_team = {}
+
     for r in games:
         if len(r) < 5:
             continue
-        team_games.setdefault(r[1], []).append(r)
-        team_games.setdefault(r[3], []).append(r)
+        t = parse_time_maybe(r[0])
+        if t is None:
+            continue
+        rows_with_time.append((t, r))
+
+        team1 = r[1]
+        team2 = r[3]
+
+        prev_t1 = first_time_by_team.get(team1)
+        if prev_t1 is None or t < prev_t1:
+            first_time_by_team[team1] = t
+        prev_t2 = first_time_by_team.get(team2)
+        if prev_t2 is None or t < prev_t2:
+            first_time_by_team[team2] = t
+
+    rows_with_time.sort(key=lambda x: x[0])
+
+    for _, r in rows_with_time:
+        team1 = r[1]
+        team2 = r[3]
+        eval_rows_by_team.setdefault(team1, []).append(r)
+        eval_rows_by_team.setdefault(team2, []).append(r)
+
+    teams_by_first_time = {}
+    for team, ft in first_time_by_team.items():
+        teams_by_first_time.setdefault(ft, []).append(team)
+
+    ordered_checkpoints = sorted(teams_by_first_time.keys())
+    return rows_with_time, first_time_by_team, eval_rows_by_team, teams_by_first_time, ordered_checkpoints
+
+
+def evaluate_new_team(model_name, params, games, teams_map, limit_eval_games=None):
+    rows_with_time, first_time_by_team, eval_rows_by_team, teams_by_first_time, ordered_checkpoints = _build_new_team_metadata(games)
 
     ModelClass = MODEL_CLASSES[model_name]
     team_nll = []
     team_brier = []
     team_acc = []
+    total_teams = len(first_time_by_team)
+    start_ts = time.time()
+    processed_teams = 0
 
-    for team, tg in team_games.items():
-        times = [row_time(r) for r in tg if row_time(r) is not None]
-        if not times:
-            continue
-        first_time = min(times)
-        train_rows, eval_rows = [], []
-        for r in games:
-            t = row_time(r)
-            if t is None:
+    # Train incrementally and evaluate teams at their first-time checkpoint.
+    # After feeding games up to each checkpoint, call converge() so models
+    # that benefit from batch re-optimization (TTT, etc.) can update ratings.
+    # Models without convergence inherit a no-op from the base class.
+    train_model = ModelClass(**params)
+    train_idx = 0
+
+    for checkpoint in ordered_checkpoints:
+        while train_idx < len(rows_with_time) and rows_with_time[train_idx][0] < checkpoint:
+            _, r = rows_with_time[train_idx]
+            train_model.update(r, teams_map.get(r[1], []), teams_map.get(r[3], []))
+            train_idx += 1
+
+        train_model.converge()
+
+        teams_at_checkpoint = teams_by_first_time.get(checkpoint, [])
+        for team in teams_at_checkpoint:
+            eval_rows = eval_rows_by_team.get(team, [])
+            if limit_eval_games:
+                eval_rows = eval_rows[:limit_eval_games]
+            if not eval_rows:
+                processed_teams += 1
                 continue
-            involves = (r[1] == team or r[3] == team)
-            if t < first_time and not involves:
-                train_rows.append(r)
-            elif involves and t >= first_time:
-                eval_rows.append(r)
-        eval_rows = sorted(eval_rows, key=chronological_key)
-        if limit_eval_games:
-            eval_rows = eval_rows[:limit_eval_games]
-        if not eval_rows:
-            continue
-        model = ModelClass(**params)
-        # train phase
-        for r in sorted(train_rows, key=chronological_key):
-            model.update(r, teams_map.get(r[1], []), teams_map.get(r[3], []))
-        # eval phase (frozen)
-        nll_sum = brier_sum = 0.0
-        acc_correct = acc_total = 0
-        wl_count = 0
-        for r in eval_rows:
-            try:
-                s1 = int(r[2]); s2 = int(r[4])
-            except Exception:
-                continue
-            team1 = teams_map.get(r[1], [])
-            team2 = teams_map.get(r[3], [])
-            try:
-                p1 = clamp_prob(model.predict_win_prob(team1, team2))
-            except Exception:
-                continue
-            # probability from perspective of target team
-            if r[1] == team:
-                p_team = p1
-                won = s1 > s2; lost = s2 > s1
-            else:
-                p_team = 1 - p1
-                won = s2 > s1; lost = s1 > s2
-            if s1 != s2:
-                outcome = 1.0 if won else 0.0
-                nll_sum += -math.log(p_team if outcome == 1.0 else (1 - p_team))
-                brier_sum += (p_team - outcome) ** 2
-                wl_count += 1
-                pred_win = p_team >= 0.5
-                if (pred_win and outcome == 1.0) or (not pred_win and outcome == 0.0):
-                    acc_correct += 1
-                acc_total += 1
-        if wl_count:
-            team_nll.append(nll_sum / wl_count)
-            team_brier.append(brier_sum / wl_count)
-            team_acc.append(acc_correct / acc_total if acc_total else None)
+
+            nll_sum = brier_sum = 0.0
+            acc_correct = acc_total = 0
+            wl_count = 0
+
+            for r in eval_rows:
+                try:
+                    s1 = int(r[2]); s2 = int(r[4])
+                except Exception:
+                    continue
+
+                team1 = teams_map.get(r[1], [])
+                team2 = teams_map.get(r[3], [])
+                p1 = clamp_prob(train_model.predict_win_prob(team1, team2))
+
+                if r[1] == team:
+                    p_team = p1
+                    won = s1 > s2
+                else:
+                    p_team = 1 - p1
+                    won = s2 > s1
+
+                if s1 != s2:
+                    outcome = 1.0 if won else 0.0
+                    nll_sum += -math.log(p_team if outcome == 1.0 else (1 - p_team))
+                    brier_sum += (p_team - outcome) ** 2
+                    wl_count += 1
+                    pred_win = p_team >= 0.5
+                    if (pred_win and outcome == 1.0) or (not pred_win and outcome == 0.0):
+                        acc_correct += 1
+                    acc_total += 1
+
+            if wl_count:
+                team_nll.append(nll_sum / wl_count)
+                team_brier.append(brier_sum / wl_count)
+                team_acc.append(acc_correct / acc_total if acc_total else None)
+
+            processed_teams += 1
+            if processed_teams == 1 or (processed_teams % 10 == 0) or processed_teams == total_teams:
+                elapsed = time.time() - start_ts
+                print(f'[new_team:{model_name}] processed {processed_teams}/{total_teams} teams in {elapsed:.1f}s')
 
     metrics = {
         'mean_nll': (sum(team_nll) / len(team_nll)) if team_nll else None,
@@ -264,7 +309,7 @@ def evaluate_new_team(model_name, params, games, teams_map, limit_eval_games=Non
 
 # ------------------ Hyperparameter search wrappers ------------------
 
-def search_model(model_name, mode, defaults, search_spec, trials, games, teams_map):
+def search_model(model_name, mode, defaults, search_spec, trials, games, teams_map, limit_eval_games=None):
     objective_metric = 'nll' if mode == 'chrono' else 'mean_nll'
 
     def objective(trial):
@@ -275,7 +320,7 @@ def search_model(model_name, mode, defaults, search_spec, trials, games, teams_m
             m = evaluate_chrono(model_name, params, teams_map, games)
             val = m['nll'] if m['nll'] is not None else float('inf')
         else:
-            m = evaluate_new_team(model_name, params, games, teams_map)
+            m = evaluate_new_team(model_name, params, games, teams_map, limit_eval_games=limit_eval_games)
             val = m['mean_nll'] if m['mean_nll'] is not None else float('inf')
         trial.set_user_attr('metrics', m)
         trial.set_user_attr('params', params)
@@ -306,7 +351,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--config', required=True, help='Unified config JSON')
     ap.add_argument('--mode', choices=['chrono','new_team','both'], default=None, help='Training mode to run')
-    ap.add_argument('--model', choices=['elo','trueskill','trueskill_mov','bt_mov','bt_mov_time_decay','bt_vet','bt_uncert'], help='Train only this model (default: all models in config)')
+    ap.add_argument('--model', choices=['elo','trueskill','trueskill_mov','bt_mov','bt_mov_time_decay','bt_vet','bt_uncert','ttt'], help='Train only this model (default: all models in config)')
     ap.add_argument('--trials-override', type=int, help='Override trials for all models (quick test)')
     ap.add_argument('--limit-eval-games', type=int, default=None, help='(Future) limit eval games for speed in new_team mode')
     args = ap.parse_args()
@@ -333,7 +378,16 @@ def main():
     if mode in ('chrono','both'):
         for mname, mc in models_cfg.items():
             trials = args.trials_override or mc.get('trials', 20)
-            res = search_model(mname, 'chrono', mc.get('defaults', {}), mc.get('search', {}), trials, games, teams_map)
+            res = search_model(
+                mname,
+                'chrono',
+                mc.get('defaults', {}),
+                mc.get('search', {}),
+                trials,
+                games,
+                teams_map,
+                limit_eval_games=args.limit_eval_games,
+            )
             # cross-mode
             res['cross_mode_metrics'] = cross_mode_metrics(mname, res['params'], games, teams_map)['new_team']
             results_chrono[mname] = res
@@ -346,7 +400,16 @@ def main():
     if mode in ('new_team','both'):
         for mname, mc in models_cfg.items():
             trials = args.trials_override or mc.get('trials', 20)
-            res = search_model(mname, 'new_team', mc.get('defaults', {}), mc.get('search', {}), trials, games, teams_map)
+            res = search_model(
+                mname,
+                'new_team',
+                mc.get('defaults', {}),
+                mc.get('search', {}),
+                trials,
+                games,
+                teams_map,
+                limit_eval_games=args.limit_eval_games,
+            )
             # cross-mode
             res['cross_mode_metrics'] = cross_mode_metrics(mname, res['params'], games, teams_map)['chrono']
             results_new_team[mname] = res
