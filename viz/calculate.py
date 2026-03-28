@@ -23,6 +23,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from data.data_loader import load_teams, load_games, get_all_players, parse_time_maybe
+from models.base import Model
 from models.elo import EloModel
 from models.trueskill import TrueSkillModel
 from models.trueskill_mov import TrueSkillMovModel
@@ -90,7 +91,11 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
     ModelClass = model_classes.get(model_name)
     if ModelClass is None:
         raise SystemExit('Unknown model: ' + model_name)
-    model = ModelClass()
+
+    def build_model():
+        return ModelClass()
+
+    model = build_model()
 
     # bt_normal persists learned tau via an in-band pseudo-player column.
     output_players = list(all_players)
@@ -98,7 +103,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
         output_players.append('Tau')
 
     # Check if model provides all historical ratings at once
-    provides_all_historical = hasattr(model, 'get_all_historical_ratings') and callable(getattr(model, 'get_all_historical_ratings'))
+    provides_all_historical = ModelClass.get_all_historical_ratings is not Model.get_all_historical_ratings
 
     history_map = OrderedDict()
     last_processed_time = None
@@ -138,9 +143,8 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
         earliest_dt = None
         for row in games:
             time_str = row[0]
-            try:
-                dt = datetime.strptime(time_str, '%m/%d/%Y %H:%M:%S')
-            except Exception:
+            dt = parse_time_maybe(time_str)
+            if dt is None:
                 continue
             if earliest_dt is None or dt < earliest_dt:
                 earliest_dt = dt
@@ -179,6 +183,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
             print(f'Processed {len(games_to_process)} games and computed {len(all_historical)} historical time steps.')
         else:
             print(f'Warning: get_all_historical_ratings returned empty. Falling back to incremental mode.')
+            model = build_model()
             # Fall through to incremental processing
             for row, team1, team2 in games_to_process:
                 model.update(row, team1, team2)

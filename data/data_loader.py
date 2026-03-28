@@ -54,7 +54,14 @@ def read_model_config(path):
 
 def parse_time_maybe(ts_str):
     """Parse timestamp strings used in these scripts. Returns datetime or None."""
-    for fmt in ('%m/%d/%Y %H:%M:%S', '%m/%d/%Y %H:%M', '%m/%d/%Y'):
+    for fmt in (
+        '%m/%d/%Y %H:%M:%S',
+        '%m/%d/%Y %H:%M',
+        '%m/%d/%Y',
+        '%m/%d/%y %H:%M:%S',
+        '%m/%d/%y %H:%M',
+        '%m/%d/%y',
+    ):
         try:
             return datetime.strptime(ts_str, fmt)
         except Exception:
