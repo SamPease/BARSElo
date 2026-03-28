@@ -30,13 +30,13 @@ from .base import Model
 # Default hyperparameters for TrueSkill Through Time
 DEFAULT_MU = 25.0                   # Initial skill mean
 DEFAULT_SIGMA = 8.3333333333333                 # Initial skill uncertainty (increased for stability)
-DEFAULT_BETA = 1.0                  # Performance variability
-DEFAULT_GAMMA = 0.02                # Skill evolution rate (reduced for stability)
+DEFAULT_BETA = 5.0                # Performance variability
+DEFAULT_GAMMA = 0.5               # Skill evolution rate (reduced for stability)
 DEFAULT_P_DRAW = 0.06                       # Probability of draw
 
 # Exposure parameters
-DEFAULT_DISPLAY_CENTER = 1000.0     # Center for exposed ratings
-DEFAULT_DISPLAY_SPREAD = 200.0      # Spread for exposed ratings
+DEFAULT_DISPLAY_CENTER = 0.0        # Center for exposed ratings (mu-3*sigma=0 → rating 0)
+DEFAULT_DISPLAY_SPREAD = 40.0       # Spread for exposed ratings (mu scales to 1000)
 
 
 class TTTModel(Model):
@@ -153,7 +153,7 @@ class TTTModel(Model):
         return self._default_player()
 
     def _ensure_priors_for_all_seen_players(self, compositions):
-        """Ensure all players in the current history have a valid prior player object."""
+        """Ensure all players in the current history have a valid prior Player object."""
         seen = set()
         for game in compositions:
             for team in game:
@@ -375,6 +375,9 @@ class TTTModel(Model):
         if not self._valid_composition:
             return
 
+        # Ensure all players have proper Gaussian priors (mu=25, sigma=8.333)
+        self._ensure_priors_for_all_seen_players(self._valid_composition)
+
         try:
             h = ttt.History(
                 composition=self._valid_composition,
@@ -499,8 +502,11 @@ class TTTModel(Model):
         """
         Return exposed ratings for a list of players.
         
-        Exposed rating uses the conservative TrueSkill estimate: mu - 3*sigma,
-        then maps it into display space with center/spread.
+        Exposes conservative estimate (mu - 3*sigma) scaled by 40.
+        This ensures:
+        - New players start at 0 (mu=25, sigma=8.333 → mu-3σ=0)
+        - Established average players approach 1000 as sigma shrinks (mu=25, σ→0 → rating 1000)
+        - Better players have higher ratings, worse players lower
         
         Args:
             players (list): List of player IDs
@@ -511,16 +517,20 @@ class TTTModel(Model):
         self._build_history()
         
         exposed = []
-        baseline_conservative = self.mu - (3.0 * self.sigma)
+        baseline_mu = self.mu
+        baseline_sigma = self.sigma
+        scale_factor = 1000.0 / baseline_mu  # 40 when DEFAULT_MU = 25
+        
         for p in players:
             if p in self._player_ratings:
                 mu, sigma = self._player_ratings[p]
-                conservative = mu - (3.0 * sigma)
             else:
-                conservative = baseline_conservative
+                mu = baseline_mu
+                sigma = baseline_sigma
 
-            # Conservative rating scaled for visualization.
-            exposed_rating = self.display_center + self.display_spread * conservative
+            # Conservative estimate: mu - 3*sigma, scaled so 25 → 1000
+            conservative = mu - (3.0 * sigma)
+            exposed_rating = conservative * scale_factor
             
             exposed.append(round(exposed_rating, 2))
         
@@ -628,6 +638,11 @@ class TTTModel(Model):
 
         # For each time, gather ratings for all players
         result = {}
+        baseline_mu = self.mu
+        baseline_sigma = self.sigma
+        baseline_conservative = baseline_mu - (3.0 * baseline_sigma)
+        scale_factor = 1000.0 / baseline_mu  # 40 when DEFAULT_MU = 25
+        
         for t in sorted(all_times):
             ratings = []
             for player_id in all_players:
@@ -644,16 +659,14 @@ class TTTModel(Model):
                     if matching_gaussian is not None:
                         mu, sigma = matching_gaussian.mu, matching_gaussian.sigma
                         conservative = mu - (3.0 * sigma)
-                        exposed_rating = self.display_center + self.display_spread * conservative
+                        exposed_rating = conservative * scale_factor
                         ratings.append(round(exposed_rating, 2))
                     else:
                         # No rating before time t
-                        baseline = self.mu - (3.0 * self.sigma)
-                        ratings.append(round(self.display_center + self.display_spread * baseline, 2))
+                        ratings.append(round(baseline_conservative * scale_factor, 2))
                 else:
                     # Player has no learning curve (never played)
-                    baseline = self.mu - (3.0 * self.sigma)
-                    ratings.append(round(self.display_center + self.display_spread * baseline, 2))
+                    ratings.append(round(baseline_conservative * scale_factor, 2))
 
             # Store ratings for this time.
             time_str = self._format_output_time(t)

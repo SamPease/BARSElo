@@ -30,6 +30,7 @@ from models.bt_mov import BTMOVModel
 from models.bt_mov_time_decay import BTMOVTimeDecayModel
 from models.bt_vet import BTVetModel
 from models.bt_uncert import BTUncertModel
+from models.bt_normal import BTNormalModel
 from models.ttt import TTTModel
 
 # Default model name (can be changed)
@@ -83,12 +84,18 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
         'bt_mov_time_decay': BTMOVTimeDecayModel,
         'bt_vet': BTVetModel,
         'bt_uncert': BTUncertModel,
+        'bt_normal': BTNormalModel,
         'ttt': TTTModel,
     }
     ModelClass = model_classes.get(model_name)
     if ModelClass is None:
         raise SystemExit('Unknown model: ' + model_name)
     model = ModelClass()
+
+    # bt_normal persists learned tau via an in-band pseudo-player column.
+    output_players = list(all_players)
+    if model_name == 'bt_normal' and 'Tau' not in output_players:
+        output_players.append('Tau')
 
     # Check if model provides all historical ratings at once
     provides_all_historical = hasattr(model, 'get_all_historical_ratings') and callable(getattr(model, 'get_all_historical_ratings'))
@@ -99,7 +106,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
     # Attempt to resume from existing state unless force_recompute is set
     if not force_recompute and os.path.exists(output_file):
         print(f'Found existing results at {output_file}')
-        if model.load_state(output_file, all_players):
+        if model.load_state(output_file, output_players):
             print('Successfully loaded previous state. Resuming from last game...')
             # Load existing history from CSV
             try:
@@ -140,7 +147,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
         if earliest_dt is not None:
             initial_dt = earliest_dt - timedelta(minutes=20)
             initial_time_str = initial_dt.strftime('%m/%d/%Y %H:%M:%S')
-            history_map[initial_time_str] = [initial_time_str] + model.expose(all_players)
+            history_map[initial_time_str] = [initial_time_str] + model.expose(output_players)
 
     # =========================================================================
     # BRANCH 1: Models using all-historical-ratings (e.g., TTT)
@@ -164,7 +171,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
             model.update(row, team1, team2)
         
         # Get all historical ratings at once
-        all_historical = model.get_all_historical_ratings(all_players)
+        all_historical = model.get_all_historical_ratings(output_players)
         
         if all_historical:
             for time_str, ratings in all_historical.items():
@@ -176,7 +183,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
             for row, team1, team2 in games_to_process:
                 model.update(row, team1, team2)
                 time = row[0] if len(row) > 0 else ''
-                row_out = [time] + model.expose(all_players)
+                row_out = [time] + model.expose(output_players)
                 history_map[time] = row_out
     
     # =========================================================================
@@ -209,7 +216,7 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
 
             # Call model's update with the whole row; model decides what to use.
             model.update(row, team1, team2)
-            row_out = [time] + model.expose(all_players)
+            row_out = [time] + model.expose(output_players)
             history_map[time] = row_out
             games_processed += 1
 
@@ -218,17 +225,17 @@ def run_model(model_name, team_to_players, games, all_players, output_file, forc
         else:
             print(f'Processed {games_processed} total games.')
 
-    _write_map(output_file, all_players, history_map)
+    _write_map(output_file, output_players, history_map)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov, bt_mov_time_decay, bt_vet, bt_uncert, ttt')
+    parser.add_argument('--model', '-m', default=DEFAULT_MODEL, help='Model to run: elo, trueskill, trueskill_mov, bt_mov, bt_mov_time_decay, bt_vet, bt_uncert, bt_normal, ttt')
     parser.add_argument('--force', '-f', action='store_true', help='Force recompute from scratch, ignoring existing results')
     args = parser.parse_args()
 
     model_name = args.model.lower()
-    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov', 'bt_mov_time_decay', 'bt_vet', 'bt_uncert', 'ttt'):
+    if model_name not in ('elo', 'trueskill', 'trueskill_mov', 'bt_mov', 'bt_mov_time_decay', 'bt_vet', 'bt_uncert', 'bt_normal', 'ttt'):
         raise SystemExit('Unknown model: ' + model_name)
 
     team_to_players = load_teams(TEAMS)

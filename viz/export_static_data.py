@@ -4,11 +4,13 @@ Export ELO data to JSON for static website.
 
 Run this script whenever your data changes to regenerate the static site data:
     python viz/export_static_data.py
+    python viz/export_static_data.py --model ttt
 
 This creates static-site/data/elo_data.json containing all players, teams, 
 games, and ELO history needed for the static website.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -24,7 +26,7 @@ import numpy as np
 from data.data_loader import parse_time_maybe
 
 # Constants
-ELO_RESULTS = 'viz/bt_uncert_results.csv'
+DEFAULT_MODEL = 'bt_uncert'
 TEAMS_FILE = 'data/Sports Elo - Teams.csv'
 GAMES_FILE = 'data/Sports Elo - Games.csv'
 INITIAL_ELO = 1000
@@ -32,12 +34,13 @@ OUTPUT_DIR = 'static-site/data'
 OUTPUT_FILE = 'elo_data.json'
 
 
-def load_and_export():
+def load_and_export(model=DEFAULT_MODEL):
     """Load all data and export to JSON."""
     
     # Load ELO results
-    print("Loading ELO results...")
-    df = pd.read_csv(ELO_RESULTS)
+    elo_results = f'viz/{model}_results.csv'
+    print(f"Loading results from {elo_results}...")
+    df = pd.read_csv(elo_results)
     # Ensure there is a 'Time' column and parse it robustly
     if 'Time' not in df.columns:
         df.rename(columns={df.columns[0]: 'Time'}, inplace=True)
@@ -285,5 +288,14 @@ def load_and_export():
     print("  3. Re-run this script whenever your data updates")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Export ELO data to JSON for static website.')
+    parser.add_argument('--model', default=DEFAULT_MODEL,
+                        help=f'Model name to export (default: {DEFAULT_MODEL}). '
+                             'Loads viz/<model>_results.csv')
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
-    load_and_export()
+    args = parse_args()
+    load_and_export(model=args.model)

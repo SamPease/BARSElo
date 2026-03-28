@@ -225,8 +225,8 @@ def write_teams_csv(path: str, header: List[str], rows: List[List[str]]) -> None
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Resolve player name aliases in a teams CSV")
-    parser.add_argument("--teams", default="Sports Elo - Teams.csv", help="path to teams CSV")
-    parser.add_argument("--aliases", default="aliases.csv", help="path to aliases CSV to append")
+    parser.add_argument("--teams", default=os.path.join("data", "Sports Elo - Teams.csv"), help="path to teams CSV")
+    parser.add_argument("--aliases", default=os.path.join("data", "aliases.csv"), help="path to aliases CSV to append")
     parser.add_argument("--dry-run", action="store_true", help="only show suggested merges, don't write")
     parser.add_argument("--min-score", type=float, default=0.72, help="minimum candidate score to consider")
     args = parser.parse_args()

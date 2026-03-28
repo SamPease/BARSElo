@@ -69,6 +69,7 @@ from models.bt_mov import BTMOVModel
 from models.bt_mov_time_decay import BTMOVTimeDecayModel
 from models.bt_vet import BTVetModel
 from models.bt_uncert import BTUncertModel
+from models.bt_normal import BTNormalModel
 from models.ttt import TTTModel
 
 MODEL_CLASSES = {
@@ -79,6 +80,7 @@ MODEL_CLASSES = {
     'bt_mov_time_decay': BTMOVTimeDecayModel,
     'bt_vet': BTVetModel,
     'bt_uncert': BTUncertModel,
+    'bt_normal': BTNormalModel,
     'ttt': TTTModel,
 }
 
@@ -351,7 +353,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--config', required=True, help='Unified config JSON')
     ap.add_argument('--mode', choices=['chrono','new_team','both'], default=None, help='Training mode to run')
-    ap.add_argument('--model', choices=['elo','trueskill','trueskill_mov','bt_mov','bt_mov_time_decay','bt_vet','bt_uncert','ttt'], help='Train only this model (default: all models in config)')
+    ap.add_argument('--model', choices=['elo','trueskill','trueskill_mov','bt_mov','bt_mov_time_decay','bt_vet','bt_uncert','bt_normal','ttt'], help='Train only this model (default: all models in config)')
     ap.add_argument('--trials-override', type=int, help='Override trials for all models (quick test)')
     ap.add_argument('--limit-eval-games', type=int, default=None, help='(Future) limit eval games for speed in new_team mode')
     args = ap.parse_args()

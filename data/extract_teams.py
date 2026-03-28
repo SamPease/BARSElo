@@ -5,7 +5,24 @@ import argparse
 from bs4 import BeautifulSoup
 
 DATA_DIR = os.path.join('data/teams')
-CSV_FILE = 'Sports Elo - Teams.csv'
+CSV_FILE = os.path.join('data', 'Sports Elo - Teams.csv')
+
+def load_season_mapping(mapping_file='data/season_mapping.csv'):
+    """Load filename -> season suffix mapping.
+    
+    Returns dict mapping filename -> suffix (e.g., "(S26)").
+    """
+    mapping = {}
+    if not os.path.exists(mapping_file):
+        return mapping
+    try:
+        with open(mapping_file, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                mapping[row['filename']] = row['suffix']
+    except Exception as e:
+        print(f"Warning: Could not load season mapping: {e}")
+    return mapping
 
 def extract_titles_from_html(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
@@ -219,9 +236,82 @@ def apply_aliases_and_dedupe(names, alias_map):
             deduped.append(n)
     return deduped
 
+
+def write_team_column(header_name, players, headers, rows, csv_file, managed_teams, season_mapping, filename):
+    """Write a team column to the CSV, handling replacements of managed teams.
+    
+    Returns True if column was processed, False if needs standard append logic.
+    """
+    suffix_match = re.search(r'\s\([A-Za-z]{1,2}\d{2}\)$', header_name)
+    has_suffix = bool(suffix_match)
+    
+    if has_suffix:
+        # Extract base name
+        base_name = header_name.rsplit(' (', 1)[0]
+        
+        # Check if the column already exists with this exact suffixed name (from a Registrations file)
+        # If so, overwrite it (same team source may have updated)
+        if header_name in headers:
+            col_idx = headers.index(header_name)
+            print(f"Overwriting existing column '{header_name}' (index {col_idx}) in {csv_file} -- players={len(players)}")
+            # Clear and fill the column
+            for r in rows:
+                while len(r) <= col_idx:
+                    r.append('')
+            for i, title in enumerate(players):
+                if i >= len(rows):
+                    while len(rows) <= i:
+                        rows.append([''] * len(headers))
+                rows[i][col_idx] = title
+            for i in range(len(players), len(rows)):
+                rows[i][col_idx] = ''
+            return True
+        
+        # Check if the old unsuffixed base name exists (from older imports without suffix)
+        if base_name in headers and base_name in managed_teams:
+            # Replace the old base name with the new suffixed name
+            col_idx = headers.index(base_name)
+            headers[col_idx] = header_name
+            print(f"Replacing column '{base_name}' with '{header_name}' (index {col_idx}) in {csv_file} -- players={len(players)}")
+            # Clear and fill the column
+            for r in rows:
+                while len(r) <= col_idx:
+                    r.append('')
+            for i, title in enumerate(players):
+                if i >= len(rows):
+                    while len(rows) <= i:
+                        rows.append([''] * len(headers))
+                rows[i][col_idx] = title
+            for i in range(len(players), len(rows)):
+                rows[i][col_idx] = ''
+            return True
+    
+    return False
+
 def main():
-    # Read existing CSV
+    # Load season mapping
+    season_mapping = load_season_mapping()
+    
+    # Build a set of base team names that we manage (from season_mapping)
+    # These are teams we know came from our extraction sources
+    managed_teams = set()
+    for filename in season_mapping.keys():
+        if filename.lower().endswith('.html'):
+            # Extract base team name from filename
+            base = os.path.splitext(filename)[0]
+            team_name = re.split(r'\s[|｜]\s', base, maxsplit=1)[0].strip()
+            managed_teams.add(team_name)
+    
+    print(f"Tracking {len(managed_teams)} teams from extraction sources")
+    
+    # Read existing CSV (create backup before modifying)
     if os.path.exists(CSV_FILE):
+        # Create a backup
+        import shutil
+        backup_file = f"{CSV_FILE}.backup"
+        shutil.copy2(CSV_FILE, backup_file)
+        print(f"Created backup: {backup_file}")
+        
         with open(CSV_FILE, newline='', encoding='utf-8') as f:
             reader = list(csv.reader(f))
         headers = reader[0] if reader else []
@@ -233,7 +323,7 @@ def main():
     # Determine folder to process from CLI args
     parser = argparse.ArgumentParser(description='Extract team rosters from HTML files and append to CSV')
     parser.add_argument('--folder', '-f', default=DATA_DIR, help='Folder containing HTML team files')
-    parser.add_argument('--aliases', '-a', default='aliases.csv', help="CSV file with alias,preferred per line. If missing, no aliases applied")
+    parser.add_argument('--aliases', '-a', default=os.path.join('data', 'aliases.csv'), help="CSV file with alias,preferred per line. If missing, no aliases applied")
     args = parser.parse_args()
     target_dir = args.folder
     alias_file = args.aliases
@@ -275,6 +365,11 @@ def main():
                 else:
                     # fallback to filename-derived prefix plus id
                     header_name = clean_header_name(filename)
+                
+                # Append season suffix from mapping
+                suffix = season_mapping.get(filename, '')
+                if suffix:
+                    header_name = f"{header_name} {suffix}"
 
                 # extract players within this team element (precise selector)
                 players = []
@@ -319,32 +414,35 @@ def main():
                             seen.add(n); deduped.append(n)
                     players = deduped
 
-                # write this team column like before
-                if header_name in headers:
-                    col_idx = headers.index(header_name)
-                    print(f"Overwriting column '{header_name}' (index {col_idx}) in {CSV_FILE} -- players={len(players)} {players[:3]}...{players[-3:]}")
-                    for r in rows:
-                        while len(r) <= col_idx:
-                            r.append('')
-                    for i, title in enumerate(players):
-                        if i >= len(rows):
-                            while len(rows) <= i:
-                                rows.append([''] * len(headers))
-                        rows[i][col_idx] = title
-                    # Clear any cells below the new titles for this column
-                    for i in range(len(players), len(rows)):
-                        rows[i][col_idx] = ''
-                else:
-                    print(f"Appending new column '{header_name}' to {CSV_FILE} -- players={len(players)} {players[:3]}...{players[-3:]}")
-                    headers.append(header_name)
-                    while len(rows) < len(players):
-                        rows.append([''] * (len(headers) - 1))
-                    for i, title in enumerate(players):
-                        if len(rows[i]) < len(headers) - 1:
-                            rows[i].extend([''] * (len(headers) - 1 - len(rows[i])))
-                        rows[i].append(title)
-                    for i in range(len(players), len(rows)):
-                        rows[i].append('')
+                # write this team column, handling replacements for managed teams
+                replaced = write_team_column(header_name, players, headers, rows, CSV_FILE, managed_teams, season_mapping, filename)
+                if not replaced:
+                    # Standard append logic for non-managed teams or teams without suffix
+                    if header_name in headers:
+                        col_idx = headers.index(header_name)
+                        print(f"Overwriting column '{header_name}' (index {col_idx}) in {CSV_FILE} -- players={len(players)} {players[:3]}...{players[-3:]}")
+                        for r in rows:
+                            while len(r) <= col_idx:
+                                r.append('')
+                        for i, title in enumerate(players):
+                            if i >= len(rows):
+                                while len(rows) <= i:
+                                    rows.append([''] * len(headers))
+                            rows[i][col_idx] = title
+                        # Clear any cells below the new titles for this column
+                        for i in range(len(players), len(rows)):
+                            rows[i][col_idx] = ''
+                    else:
+                        print(f"Appending new column '{header_name}' to {CSV_FILE} -- players={len(players)} {players[:3]}...{players[-3:]}")
+                        headers.append(header_name)
+                        while len(rows) < len(players):
+                            rows.append([''] * (len(headers) - 1))
+                        for i, title in enumerate(players):
+                            if len(rows[i]) < len(headers) - 1:
+                                rows[i].extend([''] * (len(headers) - 1 - len(rows[i])))
+                            rows[i].append(title)
+                        for i in range(len(players), len(rows)):
+                            rows[i].append('')
         else:
             # legacy single-team-per-file behavior
             header_from_page = extract_header_from_html(html)
@@ -352,6 +450,12 @@ def main():
                 header_name = header_from_page
             else:
                 header_name = clean_header_name(filename)
+            
+            # Append season suffix from mapping
+            suffix = season_mapping.get(filename, '')
+            if suffix:
+                header_name = f"{header_name} {suffix}"
+            
             titles = detect_and_extract(html)
             # apply aliases mapping and dedupe
             if alias_map:
@@ -364,39 +468,42 @@ def main():
                         seen.add(n); deduped.append(n)
                 titles = deduped
 
-            # If header already exists, overwrite that column; otherwise append
-            if header_name in headers:
-                col_idx = headers.index(header_name)
-                print(f"Overwriting column '{header_name}' (index {col_idx}) in {CSV_FILE}")
-                # Ensure rows have enough columns
-                for r in rows:
-                    while len(r) <= col_idx:
-                        r.append('')
-                # Write titles into the column, extending rows if necessary
-                for i, title in enumerate(titles):
-                    if i >= len(rows):
-                        # create new rows up to i
-                        while len(rows) <= i:
-                            rows.append([''] * len(headers))
-                    rows[i][col_idx] = title
-                # Clear cells below titles in that column for rows beyond titles
-                for i in range(len(titles), len(rows)):
-                    rows[i][col_idx] = ''
-            else:
-                # Append new column header
-                print(f"Appending new column '{header_name}' to {CSV_FILE}")
-                headers.append(header_name)
-                # Ensure rows list is long enough to hold all player entries
-                while len(rows) < len(titles):
-                    rows.append([''] * (len(headers) - 1))
-                # Add data to each row
-                for i, title in enumerate(titles):
-                    if len(rows[i]) < len(headers) - 1:
-                        rows[i].extend([''] * (len(headers) - 1 - len(rows[i])))
-                    rows[i].append(title)
-                # For remaining existing rows, append empty cell for this new column
-                for i in range(len(titles), len(rows)):
-                    rows[i].append('')
+            # Write team column, handling replacements for managed teams
+            replaced = write_team_column(header_name, titles, headers, rows, CSV_FILE, managed_teams, season_mapping, filename)
+            if not replaced:
+                # Standard write logic for non-managed teams or teams without suffix
+                if header_name in headers:
+                    col_idx = headers.index(header_name)
+                    print(f"Overwriting column '{header_name}' (index {col_idx}) in {CSV_FILE}")
+                    # Ensure rows have enough columns
+                    for r in rows:
+                        while len(r) <= col_idx:
+                            r.append('')
+                    # Write titles into the column, extending rows if necessary
+                    for i, title in enumerate(titles):
+                        if i >= len(rows):
+                            # create new rows up to i
+                            while len(rows) <= i:
+                                rows.append([''] * len(headers))
+                        rows[i][col_idx] = title
+                    # Clear cells below titles in that column for rows beyond titles
+                    for i in range(len(titles), len(rows)):
+                        rows[i][col_idx] = ''
+                else:
+                    # Append new column header
+                    print(f"Appending new column '{header_name}' to {CSV_FILE}")
+                    headers.append(header_name)
+                    # Ensure rows list is long enough to hold all player entries
+                    while len(rows) < len(titles):
+                        rows.append([''] * (len(headers) - 1))
+                    # Add data to each row
+                    for i, title in enumerate(titles):
+                        if len(rows[i]) < len(headers) - 1:
+                            rows[i].extend([''] * (len(headers) - 1 - len(rows[i])))
+                        rows[i].append(title)
+                    # For remaining existing rows, append empty cell for this new column
+                    for i in range(len(titles), len(rows)):
+                        rows[i].append('')
 
     # Write updated CSV
     # Clean any lingering placeholder UI strings from the table before writing.

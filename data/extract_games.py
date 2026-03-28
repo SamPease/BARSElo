@@ -17,6 +17,24 @@ CSV_PATH = os.path.join(os.path.dirname(__file__), "Sports Elo - Games.csv")
 TEAMS_CSV_PATH = os.path.join(os.path.dirname(__file__), "Sports Elo - Teams.csv")
 
 
+def load_season_mapping(mapping_file='data/season_mapping.csv'):
+    """Load filename -> season suffix mapping.
+    
+    Returns dict mapping filename -> suffix (e.g., "(S26)").
+    """
+    mapping = {}
+    if not os.path.exists(mapping_file):
+        return mapping
+    try:
+        with open(mapping_file, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                mapping[row['filename']] = row['suffix']
+    except Exception as e:
+        print(f"Warning: Could not load season mapping: {e}")
+    return mapping
+
+
 def find_html_files(directory):
     for root, _, files in os.walk(directory):
         for f in files:
@@ -192,6 +210,9 @@ def format_time_for_csv(dt: datetime):
 
 
 def main():
+    # Load season mapping
+    season_mapping = load_season_mapping()
+    
     html_files = list(find_html_files(GAMES_DIR))
     print(f"Found {len(html_files)} html files to scan in {GAMES_DIR}")
 
@@ -200,6 +221,15 @@ def main():
         try:
             g = parse_game_rows_from_html(p)
             if g:
+                # Apply season suffix to team names based on filename
+                filename = os.path.basename(p)
+                suffix = season_mapping.get(filename, '')
+                
+                if suffix:
+                    for game in g:
+                        game['team1'] = f"{game['team1']} {suffix}"
+                        game['team2'] = f"{game['team2']} {suffix}"
+                
                 print(f"{p}: found {len(g)} scored games")
                 all_new_games.extend(g)
         except Exception as e:
@@ -308,6 +338,14 @@ def main():
     combined_rows.sort(key=sort_key)
 
     tmp_path = CSV_PATH + ".tmp"
+    
+    # Create backup before overwriting
+    import shutil
+    if os.path.exists(CSV_PATH):
+        backup_file = f"{CSV_PATH}.backup"
+        shutil.copy2(CSV_PATH, backup_file)
+        print(f"Created backup: {backup_file}")
+    
     with open(tmp_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=header)
         writer.writeheader()
