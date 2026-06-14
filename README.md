@@ -2,7 +2,7 @@
 
 A machine learning-based player rating system for recreational dodgeball that uses Bradley-Terry models with Bayesian uncertainty to rank individual player skill from noisy team game data.
 
-**[View Live Rankings](https://sampease.github.io/rankings.html)** | **[Read Full Project Write-up](https://sampease.github.io/barselo.html)**
+**[View Live Rankings](https://sampease.github.io/rankings.html)** | **[Read Full Project Write-up](https://sampease.github.io/project-writeups/barselo/)**
 
 ## Overview
 
